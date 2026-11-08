@@ -28,6 +28,13 @@ CREATE OR REPLACE VIEW model_params AS
 CREATE OR REPLACE VIEW agent_fixed AS
   SELECT Agent, STok, Method FROM read_csv_auto('config/agents.csv', header = true);
 
+-- 판정 기준(judge)과 정의용 매개변수(param). 고객 데이터를 보고 보정하는 값이다.
+CREATE OR REPLACE VIEW thresholds AS
+  SELECT Key, Value, Kind, Dir, Note
+  FROM read_csv('config/thresholds.csv', header = true, all_varchar = true);
+CREATE OR REPLACE MACRO thrn(k) AS (SELECT try_cast(nullif(Value, '') AS DOUBLE) FROM thresholds WHERE Key = k);
+CREATE OR REPLACE MACRO thrs(k) AS (SELECT nullif(Value, '') FROM thresholds WHERE Key = k);
+
 -- 추출 원본 ----------------------------------------------------------------
 
 CREATE OR REPLACE VIEW calls_raw AS
@@ -150,22 +157,29 @@ CREATE OR REPLACE VIEW calls AS
   LEFT JOIN turns t ON t.OperationId = b.OperationId
   LEFT JOIN model_params m ON m.Model = b.Model;
 
--- 연속 호출 간 증가분. C2 ΔIn·재전송 계수, F2 재요청 추정에 쓴다.
+-- 연속 호출 간 증가분. C2 ΔIn·재전송 계수, A 공통 이론 캐시량, F2 재요청 추정에 쓴다.
+-- "직전 호출"은 같은 에이전트 실행(OperationId + OwnerSpanId) 안의 직전 호출이다.
+-- 가이드의 CallIdx는 턴 전체의 순번이라서, 멀티 에이전트에서는 직전 호출이 다른 에이전트의 호출일 수 있고
+-- 그러면 Input 증가분과 캐시 prefix 연속성이 틀어진다. 단일 에이전트 앱에서는 가이드와 같다.
+-- CallIdx와 N은 턴 기준(가이드와 동일), RunIdx와 NRun은 에이전트 실행 기준이다.
 -- 이전 reasoning이 다음 Input에 포함되지 않는 API면 Delta 대신 DeltaNoReason을 쓴다.
 CREATE OR REPLACE VIEW call_steps AS
   SELECT *,
          InTok - PrevIn - PrevOut                AS Delta,
          InTok - PrevIn - (PrevOut - PrevReason) AS DeltaNoReason,
-         N - CallIdx + 1                         AS Remaining
+         NRun - RunIdx + 1                       AS Remaining,
+         (OwnerSpanId IS NULL OR OwnerSpanId = RootSpanId) AS IsRoot
   FROM (
     SELECT c.*,
-           lag(InTok)     OVER w AS PrevIn,
-           lag(OutTok)    OVER w AS PrevOut,
-           lag(ReasonTok) OVER w AS PrevReason,
-           lag(Finish)    OVER w AS PrevFinish,
+           row_number() OVER r AS RunIdx,
+           count(*)     OVER (PARTITION BY OperationId, RunKey) AS NRun,
+           lag(InTok)     OVER r AS PrevIn,
+           lag(OutTok)    OVER r AS PrevOut,
+           lag(ReasonTok) OVER r AS PrevReason,
+           lag(Finish)    OVER r AS PrevFinish,
            max(CallIdx)   OVER (PARTITION BY OperationId) AS N
-    FROM calls c
-    WINDOW w AS (PARTITION BY OperationId ORDER BY CallIdx)
+    FROM (SELECT *, coalesce(OwnerSpanId, RootSpanId, 'run') AS RunKey FROM calls) c
+    WINDOW r AS (PARTITION BY OperationId, RunKey ORDER BY TimeGenerated, SpanId)
   );
 
 -- 호출 유형. E1의 CallType 분류이고 E2–E4가 같은 분류를 쓴다.
@@ -177,6 +191,25 @@ CREATE OR REPLACE VIEW call_types AS
               WHEN CallIdx = N                                THEN '4. 최종 응답'
               ELSE '5. 기타' END AS CallType
   FROM call_steps;
+
+-- 턴 단위 요약. D1·F1·F4·C1이 쓴다. 에이전트는 루트 에이전트 기준이다.
+CREATE OR REPLACE VIEW turn_cost AS
+  SELECT OperationId, any_value(RootAgent) AS Agent, any_value(TurnOk) AS TurnOk,
+         min(TimeGenerated) AS FirstCallAt, any_value(Conv) AS Conv,
+         max(CallIdx) AS N, sum(Cost) AS TurnCost,
+         sum(InTok) AS SumIn, sum(CacheTok) AS SumCache
+  FROM calls GROUP BY OperationId;
+
+-- tool 호출을 요청한 에이전트 실행에 귀속시킨다. tool span의 부모는 보통 요청한 chat span이고,
+-- 프레임워크에 따라 invoke_agent span일 수 있어 둘 다 본다.
+CREATE OR REPLACE VIEW tool_runs AS
+  SELECT t.OperationId, t.SpanId, t.ParentId, t.ToolName, t.Success, t.ErrorType, t.TimeGenerated,
+         coalesce(c.OwnerAgent, c.Agent, a.Agent) AS Agent,
+         coalesce(c.OwnerSpanId, a.SpanId)        AS RunId,
+         c.CallIdx AS RequestedByCallIdx
+  FROM tools t
+  LEFT JOIN calls c        ON c.SpanId = t.ParentId AND c.OperationId = t.OperationId
+  LEFT JOIN agent_spans a  ON a.SpanId = t.ParentId AND a.OperationId = t.OperationId;
 
 -- 점검용 ------------------------------------------------------------------
 

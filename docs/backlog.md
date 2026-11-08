@@ -60,7 +60,11 @@ A 범주의 지표와 낭비 추정은 대부분 3-B에서 측정한 S_a를 입�
 - 보고서 템플릿과 REPORT 스키마를 `assets/`와 `references/`로 넣는다.
 - **끝**: skill을 호출해 사전 점검부터 보고서 작성까지 한 번 통과한다.
 
-## 6. 섹션 3 지표를 로컬 SQL로 옮긴다
+## 6. 섹션 3 지표를 로컬 SQL로 옮긴다 — 끝남 (2026-11-09)
+
+`queries/metrics/`에 27개 파일, 59개 쿼리로 옮겼고 `scripts/run_metrics.py`가 JSON 하나로 모은다. 판정 기준은 `config/thresholds.csv`에 있다. 합성 데이터(`scripts/gen_synthetic.py`)로 심어 둔 문제가 드러나는지 확인했다. 가이드와 달라진 정의는 `docs/metrics-notes.md`에 적었다. 가이드 본문의 KQL 블록 분리는 5번(Skill 조립)에서 한다.
+
+원래 항목:
 
 1번으로 기본 뷰(`queries/views.sql`)까지는 로컬로 넘어왔다. 원인별 지표 쿼리 40개는 아직 가이드 본문의 KQL로만 있다. 이 상태로는 추출한 CSV를 두고도 지표를 손으로 다시 써야 한다.
 
