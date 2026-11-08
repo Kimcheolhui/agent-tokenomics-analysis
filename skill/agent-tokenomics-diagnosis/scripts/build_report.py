@@ -432,7 +432,7 @@ def build_causes(c):
               "bins": [dict(label=r["Bucket"][3:], value=r["HitRate"], n=f"{n0(r['FirstCalls'])}회", **({"tone": "crit"} if not r["Bucket"].startswith("a.") else {})) for r in rs]}
         if not flagged:
             return R("비해당", basis=f"보존 시간 밖 구간에서 히트율 하락이 {c.ts('a5_hit_drop')} 미만이다", charts=[ch])
-        fnd = " ".join(f"{ag}의 보존 시간 안 첫 호출 히트율은 {f2(a['HitRate'])}이고 그 밖 구간은 {f2(h)}로 떨어진다." for ag, a, o, h in flagged)
+        fnd = " ".join(f"{ag}의 보존 시간 안 첫 호출 히트율은 {f2(a['HitRate'])}이고 그 밖 구간은 {f2(h)}이다." for ag, a, o, h in flagged)
         return R("해당", fnd, waste=W(total, "Σ(보존 시간 밖 첫 호출) Cacheable(S_a) × (P_in − P_cache) × (안쪽 히트율 − 구간 히트율)",
                                      "구간별 첫 호출 수 × 히트율 차이 × 캐시 가능 토큰 × 단가 차이"),
                  diff=["보존 시간 안 구간의 히트율이 낮으면 A1·A2·A6을 함께 확인한다. 보존 시간은 `prompt_cache_retention` 설정을 [S]로 확인한다."], charts=[ch])
@@ -464,11 +464,11 @@ def build_causes(c):
                            "fmt": "pct", "yMax": 1, "capLabels": True, "xName": "구간",
                            "bins": [dict(label=r["RpmBucket"][3:], value=r["HitRate"], n=f"{n0(r['Minutes'])}분", **({"tone": "crit"} if not r["RpmBucket"].startswith("a.") else {})) for r in rp if r["Agent"] == main]})
         if not hot and not spread:
-            return R("비해당", basis=f"기준 이하 구간 대비 몰린 구간의 히트율 하락이 {c.ts('a6_hit_drop')} 미만이고 엔드포인트별 히트율 차이도 작다", charts=charts)
+            return R("비해당", basis=f"기준 이하 구간 대비 요청이 집중된 구간의 히트율 하락이 {c.ts('a6_hit_drop')} 미만이고 엔드포인트별 히트율 차이도 작다", charts=charts)
         total = sum(r["WasteUsd"] for _, _, r in hot)
-        parts = [f"{ag}는 분당 {c.rpm_limit}건 이하 구간 히트율 {f2(b['HitRate'])}가 {r['RpmBucket'][3:]} 구간에서 {f2(r['HitRate'])}로 떨어진다." for ag, b, r in hot]
+        parts = [f"{ag}의 히트율은 분당 {c.rpm_limit}건 이하 구간에서 {f2(b['HitRate'])}이고 {r['RpmBucket'][3:]} 구간에서 {f2(r['HitRate'])}이다." for ag, b, r in hot]
         parts += [f"{ag}는 엔드포인트별 히트율이 {f2(min(r['HitRate'] for r in rs))}–{f2(max(r['HitRate'] for r in rs))}로 갈린다." for ag, rs in spread]
-        return R("해당" if hot else "후보", " ".join(parts), waste=W(total, "Σ(해당 구간 호출) Cacheable(S_a) × (기준 구간 히트율 − 해당 구간 히트율) × (P_in − P_cache)", "몰린 구간 호출 수 × 히트율 차이 × 캐시 가능 토큰 × 단가 차이") if hot else None,
+        return R("해당" if hot else "후보", " ".join(parts), waste=W(total, "Σ(해당 구간 호출) Cacheable(S_a) × (기준 구간 히트율 − 해당 구간 히트율) × (P_in − P_cache)", "요청이 집중된 구간의 호출 수 × 히트율 차이 × 캐시 가능 토큰 × 단가 차이") if hot else None,
                  basis=None if hot else "엔드포인트별 히트율 차이만 있다. 게이트웨이 라우팅을 [S]로 확인한다", charts=charts)
     F["A6"] = A6
 
@@ -493,7 +493,7 @@ def build_causes(c):
             return R("비해당", basis=f"사용률 {pc(thr)} 미만인 tool이 없다", charts=[ch])
         total = sum(r["IfUnusedWasteUsd"] for r in un)
         names = ", ".join(f"{r['Agent']}의 {r['ToolName']}(약 {n0(r['ApproxTok'])} tok)" for r in un)
-        return R("후보", f"사용률이 {pc(thr)} 미만인 tool이 매 호출에 실린다: {names}.",
+        return R("후보", f"사용률이 {pc(thr)} 미만인 tool이 매 호출에 포함된다: {names}.",
                  waste=W(total, "Σ(미사용 tool) tool 토큰 × 에이전트 LLM 호출 수 × P_eff", "tool 토큰은 정의 문자 수 ÷ chars_per_token인 근사. 측정법 1·2로 확정한다"),
                  diff=["[S]로 드물지만 반드시 필요한 tool(예외 처리, 에스컬레이션)인지 확인한다. 필요하면 낭비에서 뺀다.",
                        "하위 에이전트의 tool은 요청한 에이전트 실행에 귀속시켰다."], charts=[ch])
@@ -552,7 +552,7 @@ def build_causes(c):
             return R("비해당", basis=f"턴 간 Input 증가 배수 최대 {top_['CrossTurnMultiple']}배 < 기준 {thr:g}배", charts=[ch])
         wb = {r["Agent"]: r for r in c.q("C1", "waste_baseline")}.get(top_["Agent"], {})
         ch["note"] = f"p90 대화 길이({top_['P90Turn']}턴)에서 첫 호출 Input이 1턴의 {top_['CrossTurnMultiple']}배다. 꺾이는 지점 없이 오르면 이력에 상한이 없다."
-        return R("해당", f"{top_['Agent']}의 p90 대화 길이({top_['P90Turn']}턴)에서 턴 첫 호출 Input p50이 {n0(top_['InP90'])} tok으로 1턴의 {n0(top_['In1'])} tok보다 {top_['CrossTurnMultiple']}배다. 턴 순번이 쌓일수록 매 호출이 전체 이력을 다시 싣는다.",
+        return R("해당", f"{top_['Agent']}의 p90 대화 길이({top_['P90Turn']}턴)에서 턴 첫 호출 Input p50이 {n0(top_['InP90'])} tok으로 1턴의 {n0(top_['In1'])} tok보다 {top_['CrossTurnMultiple']}배다. 턴 순번이 쌓일수록 매 호출이 전체 이력을 다시 전송한다.",
                  waste=W(wb.get("WasteUsd", 0), "Σ(턴 순번 t > k) (턴 t 첫 호출 InTok − 턴 k 첫 호출 InTok) × 턴 t의 LLM 호출 수 × P_eff",
                          f"k = {wb.get('KeepTurns')}턴 기준선. 실제 k는 리뷰로 정한다", True),
                  diff=["일정 턴 이후 평탄해지거나 톱니 모양이면 절단·요약이 있는 것이다. 이때는 A3과 함께 본다."], charts=[ch])
@@ -573,7 +573,7 @@ def build_causes(c):
         keep = c.t("c2_needed_fraction") or 0
         total = sum(r["CarriedUsd"] for r in cr) * (1 - keep)
         top_ = cr[0] if cr else None
-        fnd = " ".join(f"{r['Agent']}에서 연속 호출 사이 증가율 p95가 {r['P95GrowthRate']}이고 한 번 들어온 증가분이 이후 평균 {r['CarryFactor']}번 다시 실린다." for r in hot) or f"턴 내 Input 증가 배수 p50이 {mult}배다."
+        fnd = " ".join(f"{r['Agent']}에서 연속 호출 사이 증가율 p95가 {r['P95GrowthRate']}이고 한 번 들어온 증가분이 이후 평균 {r['CarryFactor']}번 다시 포함된다." for r in hot) or f"턴 내 Input 증가 배수 p50이 {mult}배다."
         if top_:
             fnd += f" 재전송 비용이 가장 큰 tool은 {top_['ToolName']}(결과 평균 약 {n0(top_['AvgResultTok'])} tok)이다."
         return R("후보", fnd, waste=W(total, "Σ(tool 결과) (결과 토큰 − 필요 토큰) × 이후 남은 호출 수 × P_eff",
@@ -651,7 +651,7 @@ def build_causes(c):
         if not hit:
             return R("비해당", basis="짧은 출력 호출의 비용 비중이 작거나 출력이 다양하다", charts=[ch])
         total = sum(so[ag]["ShortCost"] for ag in hit)
-        return R("해당", " ".join(f"{ag}의 짧은 출력 호출 {n0(so[ag]['ShortCalls'])}건이 비용의 {pc(sh[ag]['share'])}를 쓰고, 출력은 {n0(so[ag]['DistinctOutputs'])}가지로 수렴한다(다양성 {so[ag]['OutputDiversity']})." for ag in hit),
+        return R("해당", " ".join(f"{ag}의 짧은 출력 호출 {n0(so[ag]['ShortCalls'])}건이 비용의 {pc(sh[ag]['share'])}를 쓰고, 출력의 종류는 {n0(so[ag]['DistinctOutputs'])}가지다(다양성 {so[ag]['OutputDiversity']})." for ag in hit),
                  waste=W(total, "해당 호출의 비용 전체 (규칙으로 대체할 때의 상한)", "짧은 출력 호출 비용 합계", True),
                  diff=["그 호출이 상위 모델이면 E1과 겹친다. 규칙으로 처리할 수 있는지는 [S]로 확인한다."], charts=[ch])
     F["D3"] = D3

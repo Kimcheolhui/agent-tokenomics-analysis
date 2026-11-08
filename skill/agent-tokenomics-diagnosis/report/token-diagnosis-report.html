@@ -412,7 +412,7 @@ const REPORT = {
     summary: [
       '분석 기간 14일의 LLM 비용은 $3,280이다. 낭비 추정이 가장 큰 원인은 호출마다 바뀌는 System prompt(A1, $590)와 단순 단계의 상위 모델 사용(E1, $459)이다.',
       'System prompt 첫 줄의 현재 시각 값이 호출마다 바뀌어, 고정 Input 9,840 토큰이 대부분 캐시 단가로 과금되지 못한다.',
-      'lookup_order와 search_faq가 결과 원문을 그대로 넘겨, 턴 안에서 Input이 첫 호출의 2.6배로 불어난다(C2).',
+      'lookup_order와 search_faq가 결과 원문을 그대로 넘겨, 턴 안에서 Input이 첫 호출의 2.6배로 늘어난다(C2).',
       '대화 ID(gen_ai.conversation.id)가 기록되지 않아 대화가 길어질 때의 영향(C1)은 진단하지 못했다.',
     ],
   },
@@ -433,7 +433,7 @@ const REPORT = {
     { id: 'S2', name: '턴 첫 호출의 캐시 미스가 잦다', metric: '보존 시간 내 첫 호출 미스율 (A1)', value: 0.38, fmt: 'ratio', threshold: 0.20, dir: 'higher', status: 'abnormal', causes: ['A1', 'A2', 'A4', 'A5', 'A6'] },
     { id: 'S3', name: '턴 중간에 캐시율이 떨어진다', metric: '두 번째 이후 호출의 캐시 달성률', value: 0.81, fmt: 'ratio', threshold: 0.70, dir: 'lower', status: 'normal', causes: ['A3', 'A2'] },
     { id: 'S4', name: '고정 Input의 비용 비중이 크다', metric: '고정 Input 비용 비중 (B 공통)', value: 0.36, fmt: 'ratio', threshold: 0.30, dir: 'higher', status: 'abnormal', causes: ['B1', 'B2', 'B3', 'B4'] },
-    { id: 'S5', name: '턴 안에서 Input이 가파르게 늘어난다', metric: '턴 내 Input 증가 배수 p50 (C2)', value: 2.6, fmt: 'x', threshold: 2.0, dir: 'higher', status: 'abnormal', causes: ['C2', 'C3', 'D1'] },
+    { id: 'S5', name: '턴 안에서 Input이 크게 늘어난다', metric: '턴 내 Input 증가 배수 p50 (C2)', value: 2.6, fmt: 'x', threshold: 2.0, dir: 'higher', status: 'abnormal', causes: ['C2', 'C3', 'D1'] },
     { id: 'S6', name: '대화가 길어질수록 Input이 늘어난다', metric: '턴 간 Input 증가 배수 (C1)', value: null, fmt: 'x', threshold: 2.0, dir: 'higher', status: 'nodata', note: 'gen_ai.conversation.id 미기록', causes: ['C1'] },
     { id: 'S7', name: '턴당 호출 수의 꼬리가 길다', metric: '꼬리 턴 비용 비중 (D1)', value: 0.11, fmt: 'ratio', threshold: 0.15, dir: 'higher', status: 'normal', causes: ['D1', 'D2', 'F1', 'F2'] },
     { id: 'S8', name: '하위 에이전트의 첫 호출 Input이 크다', metric: '위임 시 Input 전달 비율 (D4)', value: 0.46, fmt: 'ratio', threshold: 0.80, dir: 'higher', status: 'normal', causes: ['D4', 'B4'] },
@@ -460,7 +460,7 @@ const REPORT = {
         {
           type: 'diff', wide: true, title: 'System prompt 변형 두 건의 첫 차이',
           sub: 'AppGenAIContent.SystemInstructions · 같은 턴의 연속 호출',
-          meta: '첫 차이는 41번째 토큰에 있고, 그 뒤 9,690 토큰이 캐시 밖으로 밀려난다.',
+          meta: '첫 차이는 41번째 토큰에 있고, 그 뒤 9,690 토큰이 캐시되지 않는다.',
           aTag: '호출 1', bTag: '호출 2',
           lines: [
             { same: '# 역할' },
@@ -537,8 +537,8 @@ const REPORT = {
     },
     {
       id: 'A5', name: '캐시 만료', verdict: '후보', from: ['S1', 'S2'],
-      rule: '보존 시간 안 구간 히트율은 높고 밖 구간에서 급락',
-      finding: '직전 첫 호출과의 간격이 보존 시간(5분)을 넘으면 히트율이 62%에서 31% 이하로 떨어진다. 야간 저트래픽 시간대에 몰려 있어 영향은 작다.',
+      rule: '보존 시간 안 구간 히트율은 높고 밖 구간에서 크게 낮음',
+      finding: '직전 첫 호출과의 간격이 보존 시간(5분)을 넘으면 히트율이 62%에서 31% 이하로 떨어진다. 야간 저트래픽 시간대에 집중되어 있어 영향은 작다.',
       waste: { usd: 13, formula: 'Σ(보존 시간 밖 첫 호출) Cacheable(S_a) × (P_in − P_cache) × (안쪽 히트율 − 구간 히트율)', inputs: '1,150회 × 0.31 + 520회 × 0.52 + 180회 × 0.56, 각 9,728 tok × $1.80/1M' },
       differential: ['A1이 함께 있어 "보존 시간 안" 히트율 자체가 62%로 낮다. A1을 고치면 이 항목의 낭비 추정이 커질 수 있다.'],
       charts: [
@@ -585,7 +585,7 @@ const REPORT = {
     {
       id: 'B1', name: '미사용 Tool 상시 전송', verdict: '해당', from: ['S4'],
       rule: '2주간 사용률 1% 미만이고 정의 토큰이 큰 tool',
-      finding: '정의된 tool 10개 중 5개가 2주 동안 1% 미만의 턴에서만 쓰였고, 이 정의 1,100 토큰이 모든 LLM 호출에 실린다. escalate_to_human은 사용률이 낮지만 에스컬레이션 경로라 제외했다.',
+      finding: '정의된 tool 10개 중 5개가 2주 동안 1% 미만의 턴에서만 쓰였고, 이 정의 1,100 토큰이 모든 LLM 호출에 포함된다. escalate_to_human은 사용률이 낮지만 에스컬레이션 경로라 제외했다.',
       waste: { usd: 132, formula: 'Σ(미사용 tool) 정의 토큰 × 에이전트 LLM 호출 수 × P_eff', inputs: '1,100 tok × 96,310회 × P_eff $1.244/1M' },
       differential: ['get_refund_policy는 자주 쓰이지만 정의가 길어 B2에서 따로 다룬다.'],
       charts: [
@@ -689,7 +689,7 @@ const REPORT = {
     {
       id: 'C2', name: 'Tool 결과 원문 전달', verdict: '해당', from: ['S5'],
       rule: '턴 내 증가 배수 p50 ≥ 2, 호출당 증가율 p95 ≥ 0.5, 샘플에서 결과 일부만 사용',
-      finding: 'lookup_order와 search_faq가 원문 JSON 전체(p95 8천 토큰대)를 돌려주고, 이 결과가 턴이 끝날 때까지 매 호출에 다시 실린다. 샘플 40턴에서 응답에 실제로 쓰인 부분은 결과의 18%였다.',
+      finding: 'lookup_order와 search_faq가 원문 JSON 전체(p95 8천 토큰대)를 돌려주고, 이 결과가 턴이 끝날 때까지 매 호출에 다시 포함된다. 샘플 40턴에서 응답에 실제로 쓰인 부분은 결과의 18%였다.',
       waste: { usd: 174, formula: 'Σ(tool 결과) (결과 토큰 − 필요 토큰) × 이후 남은 호출 수 × P_eff', inputs: '불필요 결과 41.2M tok × 재전송 3.4회 × P_eff $1.244/1M' },
       differential: [
         'C3 검색 컨텍스트: 큰 증가분 사이에 execute_tool span이 있고 retrieval span은 없다.',
@@ -1622,10 +1622,10 @@ function renderCausesInto(host) {
   if (mode === 'report') {
     const cards = R.causes.filter(isCard).sort((a, b) => b.waste.usd - a.waste.usd);
     const nHit = cards.filter(c => c.verdict === '해당').length;
-    host.append(el('p', { class: 'lede', text: `이상 증상에서 이어진 원인 가운데 해당 ${nHit}개와 후보 ${cards.length - nHit}개를 낭비 추정이 큰 순서로 싣는다. 나머지 원인의 판정 근거는 4장에 있고, 모든 원인의 그림 예시는 위쪽 "그림 카탈로그"에서 볼 수 있다.` }));
+    host.append(el('p', { class: 'lede', text: `이상 증상에서 이어진 원인 가운데 해당 ${nHit}개와 후보 ${cards.length - nHit}개를 낭비 추정이 큰 순서로 나열한다. 나머지 원인의 판정 근거는 4장에 있고, 모든 원인의 그림 예시는 위쪽 "그림 카탈로그"에서 볼 수 있다.` }));
     cards.forEach(c => list.append(causeCard(c, false)));
   } else {
-    host.append(el('p', { class: 'lede', text: `원인 ${R.causes.length}개 전체의 그림이다. 이번 보고서에 카드로 나오지 않는 원인은 점선 테두리로 표시하고, 그 원인이 해당할 때 어떤 그림이 나오는지 예시 데이터로 보여준다.` }));
+    host.append(el('p', { class: 'lede', text: `원인 ${R.causes.length}개 전체의 그림이다. 이번 보고서에 카드로 나오지 않는 원인은 점선 테두리로 표시하고, 그 원인이 해당할 때 어떤 그림이 나오는지 예시 데이터로 나타낸다.` }));
     for (const L of Object.keys(R.categories)) {
       list.append(el('div', { class: 'cat-head' }, el('span', { class: 'code', text: L }), el('h3', { text: R.categories[L].name }), el('p', { text: `키우는 항: ${R.categories[L].term}` })));
       R.causes.filter(c => c.id[0] === L).forEach(c => list.append(causeCard(c, true)));

@@ -112,7 +112,7 @@ python3 <skill>/scripts/build_report.py --metrics out/metrics.json --root . \
 | E3 | 고객의 목표 응답 길이 | 고객에게 확인 → `e3_target_tok` |
 | F3 | 연속 사용자 메시지의 임베딩 유사도 ≥ 0.85 | `F3.quick_pairs`의 SpanId로 `content_by_span` → 로컬에서 계산 |
 
-확인 결과는 `out/review.json`에 적는다(형식은 `references/build-mapping.md`). 확인하지 못한 항목은 `후보`로 둔다.
+확인 결과는 `out/review.json`에 적는다(형식은 `references/build-mapping.md`). 확인하지 못한 항목은 `후보`로 둔다. `review.json`에 쓰는 문장도 아래 "작성 규칙"과 `references/writing-style.md`를 따른다.
 
 ### 7. 최종 보고서
 
@@ -122,7 +122,7 @@ python3 <skill>/scripts/build_report.py --metrics out/metrics.json --root . \
 python3 <skill>/scripts/validate_report.py out/report.json
 ```
 
-검증을 통과한 `out/report.html`을 사용자에게 준다. 사용자에게는 결과를 세 가지로 요약한다: 비용과 낭비가 큰 원인 상위 3개, 계측 부재·미점검 목록, 사용자가 해야 할 일(S_a 실험 호출, 목표 길이 확인 등).
+검증기가 `[style]` 경고를 내면 해당 문장을 고쳐서 다시 만든다. 오류와 `[style]` 경고가 없는 `out/report.html`을 사용자에게 준다. 사용자에게는 결과를 세 가지로 요약한다: 비용과 낭비가 큰 원인 상위 3개, 계측 부재·미점검 목록, 사용자가 해야 할 일(S_a 실험 호출, 목표 길이 확인 등).
 
 ## 증상 → 후보 원인
 
@@ -134,7 +134,7 @@ python3 <skill>/scripts/validate_report.py out/report.json
 | 턴 첫 호출의 캐시 미스가 잦다 | 보존 시간 내 첫 호출 미스율 | A1, A2, A4, A5, A6 |
 | 턴 중간에 캐시율이 떨어진다 | 호출 순번별 캐시 달성률 | A3, A2 |
 | 고정 Input의 비용 비중이 크다 | 고정 Input 비용 비중 | B1–B4 |
-| 턴 안에서 Input이 가파르게 늘어난다 | 턴 내 Input 증가 배수 | C2, C3, D1 |
+| 턴 안에서 Input이 크게 늘어난다 | 턴 내 Input 증가 배수 | C2, C3, D1 |
 | 대화가 길어질수록 Input이 늘어난다 | 턴 간 Input 증가 배수 | C1 |
 | 턴당 호출 수의 꼬리가 길다 | 꼬리 턴 비용 비중 | D1, D2, F1, F2 |
 | 하위 에이전트의 첫 호출 Input이 크다 | 위임 시 Input 전달 비율 | D4, B4 |
@@ -157,6 +157,7 @@ python3 <skill>/scripts/validate_report.py out/report.json
 - "~가 아니라 ~다" 식의 대비 말투를 쓰지 않는다.
 - "수천 토큰"처럼 범위가 모호한 표현을 기준으로 쓰지 않는다.
 - 지표는 추상적으로 쓰지 않는다. 계산식이나 Application Insights의 실제 속성·컬럼 이름으로 산출 방법을 적는다.
+- **REPORT의 모든 문장에서 비유와 AI체를 쓰지 않는다.** 한 문장에 사실 하나를 지표 이름·값·기준·원인 ID로 쓴다. 은유("실린다", "불어난다", "가파르게", "몰린"), 과장 어휘, 문두 접속 부사, "결론적으로", "~가 중요하다", "~라고 볼 수 있다", 해석 서술("~를 보여 준다"), 굵은 글씨·이모지를 쓰지 않는다. 패턴과 대체 표현은 `references/writing-style.md`에 있고 `scripts/lint_text.py`가 검사한다.
 
 ## 참조 파일
 
@@ -170,6 +171,7 @@ python3 <skill>/scripts/validate_report.py out/report.json
 | `references/data-contract.md` | CSV 스키마, 원인별 필요 파일 |
 | `references/build-mapping.md` | 지표 → REPORT 대응, 게이트, `review.json` 형식 |
 | `references/report-schema.md` | REPORT 객체 스키마 |
+| `references/writing-style.md` | REPORT와 `review.json` 문장을 쓸 때. 쓰지 않는 표현과 대체 표현, 남겨 둔 용어 |
 | `references/metrics-notes.md` | 가이드와 SQL 정의가 다른 곳, 임시 기준, 낭비 추정의 성격 |
 | `references/sources.md` | 출처 |
 

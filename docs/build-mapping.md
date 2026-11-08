@@ -15,7 +15,7 @@ python3 scripts/validate_report.py out/report.json
 1. **스크립트 판정.** 텔레메트리 지표와 `config/thresholds.csv`로 정한다. `[C]` 원문이나 `[S]` 코드 리뷰가 필요한 원인은 `후보`까지만 간다. 스크립트는 확인이 끝나지 않은 것을 `해당`으로 단정하지 않는다.
 2. **리뷰 반영.** 사람 또는 Agent가 원문·코드를 확인한 뒤 `review.json`으로 판정을 바꾼다.
 
-`해당`이 나오는 경우는 가이드가 지표만으로 "판정한다"고 한 원인이다. A1(변형 비율까지 확인), A2, A4, A5, A6(몰림), C1, D1(중복 호출까지 확인), D3, E4, F1, F4가 여기에 든다.
+`해당`이 나오는 경우는 가이드가 지표만으로 "판정한다"고 한 원인이다. A1(변형 비율까지 확인), A2, A4, A5, A6(요청 집중), C1, D1(중복 호출까지 확인), D3, E4, F1, F4가 여기에 든다.
 
 ## 증상 S1–S12
 
@@ -34,7 +34,7 @@ python3 scripts/validate_report.py out/report.json
 | S11 상위 모델 | `E1.savings.SavingShare` | `e1_saving_share` | 소형 모델 단가 없음 → hold |
 | S12 늦은 실패 | `F4.failed_turns.LateFailIndex` 최악 | `f4_late_fail` | |
 
-증상 값은 **에이전트 중 가장 나쁜 값**이다. 가중 평균은 한 에이전트의 문제를 가린다. 표본이 `min_sample`보다 작은 에이전트는 뺀다.
+증상 값은 **에이전트 중 가장 나쁜 값**이다. 가중 평균은 한 에이전트의 값을 다른 에이전트의 값과 평균하므로 그 에이전트가 기준을 넘어도 증상이 나오지 않을 수 있다. 표본이 `min_sample`보다 작은 에이전트는 뺀다.
 
 ## 원인 A1–F4
 
@@ -43,9 +43,9 @@ python3 scripts/validate_report.py out/report.json
 | A1 | `A1.warm_first_miss`, `inturn_misses`, `sys_variants` | 첫 호출 미스율 ≥ `a1_warm_miss`. 변형 비율 ≥ `a1_variant_ratio`까지 만족하면 `해당`, 아니면 `후보` | 보존 시간 안 첫 호출 미스 + (턴 안 미스율도 높으면) 턴 안 미스 |
 | A2 | `A2.tooldef_variants`, `variant_share`, `waste` | 원문 변형 > 이름 집합 변형, 또는 이름 집합 변형 ≥ 2 | 다른 정의를 쓴 첫 호출 |
 | A3 | `A3.shrink`, `conv_call_profile` | 축소 이벤트 ≥ `min_sample`이고 히트율 하락 ≥ `a3_hit_drop` → `후보` | 상한(공유 길이를 모름) |
-| A4 | `A4.small_calls` | S_a < MinTok이고 실행 첫 호출 히트가 사실상 0 | 캐시 불가 호출 비용(0이면 카드 없음) |
+| A4 | `A4.small_calls` | S_a < MinTok이고 실행 첫 호출의 95% 이상이 히트 0 | 캐시 불가 호출 비용(0이면 카드 없음) |
 | A5 | `A5.gap_hit` | 보존 시간 안 히트율 − 밖 히트율 ≥ `a5_hit_drop` | 구간별 계산 |
-| A6 | `A6.rpm_hit`, `endpoint_hit` | 몰린 구간 히트율 하락 ≥ `a6_hit_drop` → `해당`, 엔드포인트 분산만 있으면 `후보` | 몰린 구간 계산 |
+| A6 | `A6.rpm_hit`, `endpoint_hit` | 요청이 집중된 구간의 히트율 하락 ≥ `a6_hit_drop` → `해당`, 엔드포인트 분산만 있으면 `후보` | 요청이 집중된 구간 계산 |
 | B1 | `B1.tool_use` | 사용률 < `b1_use_rate` → `후보` | 미사용 tool 토큰 × 호출 수 × P_eff |
 | B2 | `B2.tool_schema_size` | 중앙값의 `b2_ratio`배 이상 → `후보` | 없음(`[S]` 리뷰) |
 | B3 | `B3.system_prompt_size`, `B-common` | 고정 Input 비중 ≥ `b_fixed_share` → `후보` | 없음(`[S]` 리뷰) |

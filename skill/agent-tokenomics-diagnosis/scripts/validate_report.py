@@ -10,6 +10,7 @@ import json, pathlib, re, sys
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 from report_io import extract_report  # noqa: E402
+from lint_text import style_warnings  # noqa: E402
 
 VERDICTS = ["해당", "후보", "비해당", "계측 부재", "판정 보류", "미점검"]
 STATUSES = ["abnormal", "normal", "nodata", "hold"]
@@ -287,6 +288,8 @@ def validate(R):
     check_categories(v, R["categories"])
     check_symptoms(v, R["symptoms"])
     check_causes(v, R["causes"], [s.get("id") for s in R["symptoms"]])
+    for w in style_warnings(R):
+        v.warn("문체", w)
     return v
 
 

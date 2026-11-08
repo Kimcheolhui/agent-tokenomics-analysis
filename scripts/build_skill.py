@@ -14,14 +14,16 @@ import argparse, filecmp, pathlib, re, shutil, sys, tempfile
 REPO = pathlib.Path(__file__).resolve().parent.parent
 SKILL = REPO / "skill" / "agent-tokenomics-diagnosis"
 
-RUNTIME_SCRIPTS = ["export.py", "run_metrics.py", "build_report.py", "validate_report.py", "report_io.py"]
+RUNTIME_SCRIPTS = ["export.py", "run_metrics.py", "build_report.py", "validate_report.py", "report_io.py", "lint_text.py"]
 COPY_DIRS = ["queries", "config"]
 DOCS = {"data-contract.md": "data-contract.md", "report-schema.md": "report-schema.md",
-        "build-mapping.md": "build-mapping.md", "metrics-notes.md": "metrics-notes.md"}
+        "build-mapping.md": "build-mapping.md", "metrics-notes.md": "metrics-notes.md",
+        "writing-style.md": "writing-style.md"}
 PATH_FIX = {"docs/data-contract.md": "references/data-contract.md",
             "docs/report-schema.md": "references/report-schema.md",
             "docs/build-mapping.md": "references/build-mapping.md",
             "docs/metrics-notes.md": "references/metrics-notes.md",
+            "docs/writing-style.md": "references/writing-style.md",
             "docs/diagnosis-guide.md": "references/guide-common.md 와 references/catalog-*.md",
             "docs/backlog.md": "(저장소의 docs/backlog.md)"}
 

@@ -64,7 +64,11 @@ def main():
     failures = []
     ok = lambda b, msg: (print(("  PASS " if b else "  FAIL ") + msg), None if b else failures.append(msg))
 
-    print("[skill 동기화]")
+    print("[템플릿 문체]")
+    rc, out = sh([PY, str(REPO / "scripts" / "lint_text.py"), str(REPO / "report" / "token-diagnosis-report.html")])
+    ok(rc == 0, "템플릿(REPORT 예시와 고정 문구) 문체 검사 0건" + ("" if rc == 0 else f"\n{out}"))
+
+    print("\n[skill 동기화]")
     rc, out = sh([PY, str(REPO / "scripts" / "build_skill.py"), "--check"])
     ok(rc == 0, "skill 폴더가 원본과 같다" + ("" if rc == 0 else f"\n{out}"))
 
@@ -86,6 +90,8 @@ def main():
                 continue
             v = {c["id"]: c["verdict"] for c in rep["causes"]}
             ok(len(v) == 25, f"원인 25개 판정 ({len(v)})")
+            rc, out = sh([PY, str(SKILL / "scripts" / "lint_text.py"), str(work / "out" / "report.json")])
+            ok(rc == 0, "REPORT 문체 검사 0건" + ("" if rc == 0 else f"\n{out}"))
             if scen == "full":
                 for cid, want in EXPECT_AT_LEAST.items():
                     got = v[cid]

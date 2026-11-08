@@ -216,7 +216,7 @@ CREATE OR REPLACE VIEW tool_runs AS
 -- 점검용 ------------------------------------------------------------------
 
 -- config/model-params.csv와 매칭되지 않은 모델. 여기 행이 있으면 그 호출의 Cost가 NULL이고
--- 비용 합계에서 조용히 빠진다. 분석을 시작하기 전에 비워야 한다.
+-- 비용 합계에서 경고 없이 빠진다. 분석을 시작하기 전에 비워야 한다.
 CREATE OR REPLACE VIEW unpriced_calls AS
   SELECT coalesce(Model, '(없음)') AS Model, count(*) AS Calls
   FROM calls WHERE PIn IS NULL GROUP BY 1 ORDER BY Calls DESC;

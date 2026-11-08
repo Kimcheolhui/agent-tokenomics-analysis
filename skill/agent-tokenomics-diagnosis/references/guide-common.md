@@ -86,7 +86,7 @@ AppDependencies
 | P5 | `finish_reasons` 의 tool 호출 값 | `Calls \| summarize count() by Finish` | D1·D2·D3·E1·E4·F2의 호출 유형 분류. 쿼리는 `tool_calls`를 가정한다 |
 | P6 | 턴 1개 = trace 1개 | 아래 "턴·trace 점검" 쿼리 | 턴 단위 지표 전체 (CallIdx, 턴 비용, 꼬리 비중) |
 | P7 | `AppGenAIContent` 접근과 content recording | 테이블이 비어 있지 않은가, Privileged Monitoring Data Reader 역할 | [C] 지표 전체: A1·A2 변형 수, B1~B3 정의 크기, C2 결과 크기, D1 중복, D3 다양성, F3 메시지 |
-| P8 | 응답 모델명이 `ModelParams`와 일치 | 로컬 `unpriced_calls`, 또는 `Calls \| where isnull(PIn)` | 일치하지 않는 호출은 `Cost`가 비어 비용 합계에서 조용히 빠진다 |
+| P8 | 응답 모델명이 `ModelParams`와 일치 | 로컬 `unpriced_calls`, 또는 `Calls \| where isnull(PIn)` | 일치하지 않는 호출은 `Cost`가 비어 비용 합계에서 경고 없이 빠진다 |
 | P9 | `gen_ai.request.max_tokens` 기록 | `WithMaxTokens` | E3 max_tokens 미설정 비율. 미기록과 미설정을 구분할 수 없다 |
 
 **쿼리: 턴·trace 점검.** invoke_agent span이 trace당 몇 개인지, 한 trace가 여러 대화를 묶는지 센다. 대화 전체를 trace 하나로 묶는 앱은 `TracesWithMultiConv`가 크게 나오고, 이 경우 턴 단위 지표가 틀어진다. 반대로 한 턴을 여러 trace로 나누는 경우는 텔레메트리로 판별할 수 없으므로 \[S\]로 앱 구조를 확인한다.

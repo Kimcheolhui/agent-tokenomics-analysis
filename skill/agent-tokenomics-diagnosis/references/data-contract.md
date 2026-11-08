@@ -91,7 +91,7 @@ data/<name>/<YYYY-MM-DD>.csv
 
 컬럼: `TimeGenerated`, `TraceId`, `SpanId`, `AgentName`, `SysChars`, `SysHash`, `SysHeadHash`, `ToolDefsChars`, `ToolDefsHash`, `ToolCount`, `ToolNames`, `InChars`, `InHash`, `OutChars`, `OutHash`, `ArgsChars`, `ArgsHash`, `ResultChars`, `ResultHash`.
 
-- `SysHeadHash`는 앞 4,000자의 해시다. 차이가 앞부분에 있는지(A1 영향 크기) 가린다.
+- `SysHeadHash`는 앞 4,000자의 해시다. 차이가 앞부분에 있는지(A1 영향 크기) 확인한다.
 - `ToolNames`는 정의에 나온 **순서를 그대로** 둔 파이프 구분 목록이다. A2가 순서 변형을 보기 때문이다. 순서를 무시한 이름 집합 해시(`ToolNamesHash`)는 `views.sql`에서 정렬해 만든다.
 
 ### `tool_schemas` — 에이전트별 최신 정의의 tool 1건 = 1행
@@ -170,6 +170,6 @@ python3 scripts/export.py --workspace <GUID> --from 2026-10-20 --to 2026-11-03 \
 
 | 뷰 | 뜻 |
 | --- | --- |
-| `unpriced_calls` | `config/model-params.csv`와 매칭되지 않은 모델. 행이 있으면 그 호출의 `Cost`가 NULL이고 비용 합계에서 조용히 빠진다 |
+| `unpriced_calls` | `config/model-params.csv`와 매칭되지 않은 모델. 행이 있으면 그 호출의 `Cost`가 NULL이고 비용 합계에서 경고 없이 빠진다 |
 | `missing_sa` | S_a가 비어 있는 에이전트. A 공통·A1·A4·B 공통을 산출할 수 없다 |
 | `instrumentation` | `cache_read`, `reasoning`, `conversation.id`, `finish_reasons`, `max_tokens`, 에이전트 귀속의 기록 건수. 0이면 그 키를 쓰는 지표는 "계측 부재"로 기록한다 |

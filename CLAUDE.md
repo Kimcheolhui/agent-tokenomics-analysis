@@ -20,6 +20,7 @@
 | `queries/metrics/*.sql` | 원인별 지표 SQL 27개 파일, 61개 쿼리. 파일 ID는 가이드의 원인 ID를 따른다 | — |
 | `scripts/` | `export.py`(추출), `run_metrics.py`(지표), `build_report.py`(보고서), `validate_report.py`, `build_skill.py`, `gen_synthetic.py`(합성 데이터) | — |
 | `docs/data-contract.md`, `report-schema.md`, `build-mapping.md`, `metrics-notes.md` | CSV 스키마, REPORT 스키마, 지표 → REPORT 대응과 `review.json`, 가이드와 SQL이 다른 곳 | — |
+| `docs/writing-style.md`, `scripts/lint_text.py` | REPORT 문체 규칙(비유·AI체 제외)과 검사기 | — |
 | `docs/roadmap.md` | skill 완성까지의 단계와 설계 결정 | — |
 | `skill/agent-tokenomics-diagnosis/` | 완성된 Agent skill. `SKILL.md`만 직접 편집하고 나머지는 `scripts/build_skill.py`로 생성한다 | — |
 | `tests/e2e.py` | 합성 데이터로 skill 스크립트를 처음부터 끝까지 검증한다 | — |
@@ -100,5 +101,6 @@ python3 scripts/build_skill.py                                                  
 ## 작성 규칙
 
 - 한국어 문서는 "~한다" 평서문으로 쓴다. 짧고 직접적인 문장을 쓴다.
+- **REPORT에는 비유적 표현과 AI체를 쓰지 않는다.** 기준과 패턴은 `docs/writing-style.md`에 있고, `scripts/lint_text.py`가 검사한다. `validate_report.py`와 `tests/e2e.py`가 같은 검사를 한다. 가이드와 템플릿의 문구를 고칠 때도 같은 기준을 쓴다.
 - "~가 아니라 ~다" 식의 대비 말투를 쓰지 않는다. "하단 쿼리를 통해 속성 키를 확인할 수 있다"처럼 바로 서술한다.
 - "수천 토큰"처럼 범위가 모호한 표현을 기준으로 쓰지 않는다.
