@@ -93,13 +93,6 @@ CREATE OR REPLACE VIEW turns AS
         FROM agent_spans)
   WHERE rn = 1;
 
--- 루트가 아닌 invoke_agent span = 하위 에이전트 실행. D4에 쓴다.
-CREATE OR REPLACE VIEW sub_agents AS
-  SELECT a.OperationId, a.SpanId AS SubSpanId, a.ParentId, a.Agent AS SubAgent,
-         a.TimeGenerated, a.Success, a.DurationMs
-  FROM agent_spans a JOIN turns t ON t.OperationId = a.OperationId
-  WHERE a.SpanId <> t.RootSpanId;
-
 -- span 부모 링크. call_owner의 탐색용이다. 추출한 span 종류만 들어 있다.
 CREATE OR REPLACE VIEW span_parents AS
             SELECT OperationId, SpanId, blank(ParentId) AS ParentId FROM calls_raw
@@ -107,14 +100,17 @@ CREATE OR REPLACE VIEW span_parents AS
   UNION ALL SELECT OperationId, SpanId, ParentId FROM tools
   UNION ALL SELECT DISTINCT OperationId, SpanId, ParentId FROM retrieval;
 
--- 호출을 가장 가까운 조상 invoke_agent span에 귀속시킨다.
+-- LLM 호출, tool, 하위 에이전트 span을 가장 가까운 조상 invoke_agent span에 귀속시킨다.
 -- gen_ai.agent.name이 chat span에 없으면 호출이 루트 에이전트로 집계된다. 멀티 에이전트에서는
 -- 하위 에이전트의 호출과 tool이 상위로 잘못 붙는다(가이드 B1 판정의 주의사항, D4의 에이전트 매핑).
 -- 중간 span이 추출 대상 밖이면 탐색이 끊기고, 그 호출은 calls에서 RootAgent로 되돌아간다.
 CREATE OR REPLACE VIEW call_owner AS
   WITH RECURSIVE walk AS (
-      SELECT SpanId AS CallSpanId, OperationId, blank(ParentId) AS Cur, 0 AS Depth
-      FROM calls_raw
+      SELECT SpanId AS CallSpanId, OperationId, blank(ParentId) AS Cur, 0 AS Depth FROM calls_raw
+    UNION ALL
+      SELECT SpanId, OperationId, ParentId, 0 FROM tools
+    UNION ALL
+      SELECT SpanId, OperationId, ParentId, 0 FROM agent_spans
     UNION ALL
       SELECT w.CallSpanId, w.OperationId, p.ParentId, w.Depth + 1
       FROM walk w
@@ -126,6 +122,17 @@ CREATE OR REPLACE VIEW call_owner AS
          a.SpanId AS OwnerSpanId, a.Agent AS OwnerAgent, w.Depth
   FROM walk w
   JOIN agent_spans a ON a.OperationId = w.OperationId AND a.SpanId = w.Cur;
+
+-- 루트가 아닌 invoke_agent span = 하위 에이전트 실행. D4에 쓴다.
+-- 하위 에이전트 span의 부모는 상위 invoke_agent span이거나, 에이전트를 tool로 부르는 구조에서는 위임 tool(execute_tool) span이다.
+-- 어느 쪽이든 ParentRunSpanId에 가장 가까운 조상 invoke_agent span(= 위임한 상위 에이전트 실행)을 넣는다.
+CREATE OR REPLACE VIEW sub_agents AS
+  SELECT a.OperationId, a.SpanId AS SubSpanId, a.ParentId, a.Agent AS SubAgent,
+         a.TimeGenerated, a.Success, a.DurationMs,
+         coalesce(o.OwnerSpanId, a.ParentId) AS ParentRunSpanId
+  FROM agent_spans a JOIN turns t ON t.OperationId = a.OperationId
+  LEFT JOIN call_owner o ON o.SpanId = a.SpanId AND o.OperationId = a.OperationId
+  WHERE a.SpanId <> t.RootSpanId;
 
 -- LLM 호출. CallIdx, Cost, 모델 파라미터가 붙는다. 가이드의 Calls에 대응한다.
 -- Agent는 호출 자신의 값 → 조상 invoke_agent → 루트 순으로 정한다.
@@ -202,16 +209,27 @@ CREATE OR REPLACE VIEW turn_cost AS
          sum(InTok) AS SumIn, sum(CacheTok) AS SumCache
   FROM calls GROUP BY OperationId;
 
--- tool 호출을 요청한 에이전트 실행에 귀속시킨다. tool span의 부모는 보통 요청한 chat span이고,
--- 프레임워크에 따라 invoke_agent span일 수 있어 둘 다 본다.
+-- tool 호출을 에이전트 실행(RunId)과 요청한 LLM 호출(RequestedBySpanId)에 귀속시킨다.
+-- OTel 규약과 Foundry 문서에서 execute_tool span은 invoke_agent span의 자식이라서 부모만으로는 요청한 chat 호출을 알 수 없다.
+-- 부모가 chat span이면 그 호출을 쓰고, 아니면 같은 에이전트 실행에서 tool 시작 시각 이전에 시작한 마지막 호출을 쓴다.
 CREATE OR REPLACE VIEW tool_runs AS
-  SELECT t.OperationId, t.SpanId, t.ParentId, t.ToolName, t.Success, t.ErrorType, t.TimeGenerated,
-         coalesce(c.OwnerAgent, c.Agent, a.Agent) AS Agent,
-         coalesce(c.OwnerSpanId, a.SpanId)        AS RunId,
-         c.CallIdx AS RequestedByCallIdx
-  FROM tools t
-  LEFT JOIN calls c        ON c.SpanId = t.ParentId AND c.OperationId = t.OperationId
-  LEFT JOIN agent_spans a  ON a.SpanId = t.ParentId AND a.OperationId = t.OperationId;
+  WITH own AS (
+    SELECT t.OperationId, t.SpanId, t.ParentId, t.ToolName, t.Success, t.ErrorType, t.TimeGenerated,
+           o.OwnerSpanId AS RunId, o.OwnerAgent AS OwnerAgent
+    FROM tools t LEFT JOIN call_owner o ON o.SpanId = t.SpanId AND o.OperationId = t.OperationId),
+  req AS (
+    SELECT w.SpanId, w.OperationId, r.SpanId AS AsofCallSpanId
+    FROM own w ASOF LEFT JOIN (SELECT OperationId, OwnerSpanId, SpanId, TimeGenerated FROM calls) r
+      ON w.OperationId = r.OperationId AND w.RunId = r.OwnerSpanId AND w.TimeGenerated >= r.TimeGenerated)
+  SELECT w.OperationId, w.SpanId, w.ParentId, w.ToolName, w.Success, w.ErrorType, w.TimeGenerated,
+         coalesce(w.OwnerAgent, tu.RootAgent) AS Agent, w.RunId,
+         coalesce(pc.SpanId, a.AsofCallSpanId) AS RequestedBySpanId,
+         coalesce(pc.CallIdx, rc.CallIdx) AS RequestedByCallIdx
+  FROM own w
+  LEFT JOIN req a ON a.SpanId = w.SpanId AND a.OperationId = w.OperationId
+  LEFT JOIN calls pc ON pc.SpanId = w.ParentId AND pc.OperationId = w.OperationId
+  LEFT JOIN calls rc ON rc.SpanId = a.AsofCallSpanId AND rc.OperationId = w.OperationId
+  LEFT JOIN turns tu ON tu.OperationId = w.OperationId;
 
 -- 점검용 ------------------------------------------------------------------
 
@@ -256,3 +274,16 @@ CREATE OR REPLACE VIEW overview AS
          round(1.0 * sum(CacheTok) / nullif(sum(InTok), 0), 3) AS CacheRate,
          round(sum(OutTok * POut / 1e6) / nullif(sum(Cost), 0), 3) AS OutCostShare
   FROM calls;
+
+-- 턴 = trace 가정 점검 (가이드 사전 점검 "턴·trace 점검"). 루트 invoke_agent = 상위 invoke_agent 조상이 없는 span.
+-- TracesWithMultiRoot가 크면 한 trace가 여러 턴을 묶는 앱이다. TracesWithMultiConv가 크면 한 trace가 여러 대화를 묶는다.
+-- 어느 쪽이든 턴 단위 지표(D1, F3, 턴 비용)가 틀어진다.
+CREATE OR REPLACE VIEW turn_trace_check AS
+  WITH roots AS (
+    SELECT a.OperationId, a.SpanId, a.ConvId FROM agent_spans a
+    LEFT JOIN call_owner o ON o.SpanId = a.SpanId AND o.OperationId = a.OperationId
+    WHERE o.SpanId IS NULL),
+  per AS (SELECT OperationId, count(*) AS RootSpans, count(DISTINCT ConvId) AS Convs FROM roots GROUP BY 1)
+  SELECT count(*) AS Traces, quantile_cont(RootSpans, 0.5) AS P50RootSpans, max(RootSpans) AS MaxRootSpans,
+         count_if(RootSpans > 1) AS TracesWithMultiRoot, count_if(Convs > 1) AS TracesWithMultiConv
+  FROM per;

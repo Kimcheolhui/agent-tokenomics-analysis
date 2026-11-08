@@ -33,9 +33,9 @@ WITH cr AS (SELECT Agent, 1.0 * sum(CacheTok) / nullif(sum(InTok), 0) AS r FROM 
 x AS (
   SELECT t.ToolName, cs.Agent, c.ResultChars / thrn('chars_per_token') AS ResultTok, cs.Remaining - 1 AS RemAfter,
          (1 - cr.r) * cs.PIn + cr.r * cs.PCache AS PEff
-  FROM tools t
+  FROM tool_runs t
   JOIN content c ON c.SpanId = t.SpanId AND c.OperationId = t.OperationId
-  JOIN call_steps cs ON cs.SpanId = t.ParentId AND cs.OperationId = t.OperationId
+  JOIN call_steps cs ON cs.SpanId = t.RequestedBySpanId AND cs.OperationId = t.OperationId
   JOIN cr ON cr.Agent = cs.Agent
   WHERE c.ResultChars IS NOT NULL AND t.Success)
 SELECT ToolName, count(*) AS Calls, round(avg(ResultTok)) AS AvgResultTok, round(avg(RemAfter), 2) AS AvgCarriedCalls,

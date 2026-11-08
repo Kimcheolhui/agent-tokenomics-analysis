@@ -15,47 +15,15 @@
 
 **쿼리: 턴 순번별 첫 호출 Input.** 대화의 몇 번째 턴인지에 따라 첫 호출 InTok 중앙값이 어떻게 늘어나는지 선 그래프로 그린다. 이력에 상한이 있는지(C1) 확인한다.
 
-```kusto
-Calls
-| where CallIdx == 1 and isnotempty(Conv)
-| sort by Conv asc, TimeGenerated asc
-| extend TurnIdx = row_number(1, prev(Conv) != Conv)
-| where TurnIdx <= 30
-| summarize Convs = dcount(Conv), P50In = percentile(InTok, 50) by Agent, TurnIdx
-| order by Agent asc, TurnIdx asc
-| render linechart
-```
+SQL: `queries/metrics/C1.sql`의 `turn_idx_input`.
 
 **쿼리: 긴 대화의 비용 비중.** 대화당 턴 수 분포와, 턴 수 상위 10% 대화가 전체 비용에서 차지하는 비중을 구한다. C1의 영향 크기를 가늠한다.
 
-```kusto
-let ConvCost = Calls
-    | where isnotempty(Conv)
-    | summarize Turns = dcount(OperationId), Cost = sum(Cost) by Agent, Conv;
-ConvCost
-| join kind=inner (ConvCost | summarize P50Turns = percentile(Turns, 50),
-                                      P90Turns = percentile(Turns, 90) by Agent) on Agent
-| summarize P50Turns = any(P50Turns), P90Turns = any(P90Turns),
-            LongConvCostShare = round(sumif(Cost, Turns >= P90Turns) / sum(Cost), 3) by Agent
-```
+SQL: `queries/metrics/C1.sql`의 `conv_cost`.
 
 **쿼리: 턴 간 Input 증가 배수.** 에이전트별로 대화 길이의 p90에 해당하는 턴을 구하고, 그 턴의 첫 호출 InTok 중앙값을 1턴의 값과 비교한다. C1 판정 기준을 계산할 때 쓴다.
 
-```kusto
-let FirstCalls = Calls
-    | where CallIdx == 1 and isnotempty(Conv)
-    | sort by Conv asc, TimeGenerated asc
-    | extend TurnIdx = row_number(1, prev(Conv) != Conv);
-let P90Turn = FirstCalls
-    | summarize Turns = max(TurnIdx) by Agent, Conv
-    | summarize P90Turn = toint(percentile(Turns, 90)) by Agent;
-FirstCalls
-| summarize P50In = percentile(InTok, 50) by Agent, TurnIdx
-| join kind=inner P90Turn on Agent
-| summarize In1 = maxif(P50In, TurnIdx == 1), InP90 = maxif(P50In, TurnIdx == P90Turn),
-            P90Turn = any(P90Turn) by Agent
-| extend CrossTurnMultiple = round(1.0 * InP90 / In1, 2)
-```
+SQL: `queries/metrics/C1.sql`의 `cross_turn`.
 
 - **판정**
   - 턴 간 Input 증가 배수가 2 이상이면, 대화 길이 p90 시점에 이력이 기본 Input보다 커진 것이므로 C1로 판정한다(초기값). C2의 턴 내 증가 배수와 같은 기준이다.
@@ -76,42 +44,11 @@ FirstCalls
 
 **쿼리: 턴 내 Input 증가 배수와 호출당 증가율.** 턴 첫 호출 대비 마지막 호출의 Input 배수와, 연속 호출 사이 증가분(ΔIn)이 직전 Input에서 차지하는 비율을 에이전트별로 구한다. 재전송 계수도 함께 구한다. content 없이 C2를 진단할 때 쓴다.
 
-```kusto
-let TurnCalls = Calls | summarize N = max(CallIdx) by OperationId;
-let Steps = Calls
-    | extend PrevIn  = iff(CallIdx > 1, prev(InTok), long(null)),
-             PrevOut = iff(CallIdx > 1, prev(OutTok), long(null))
-    | where CallIdx > 1
-    | join kind=inner TurnCalls on OperationId
-    | extend Delta = InTok - PrevIn - PrevOut, Remaining = N - CallIdx + 1
-    | extend GrowthRate = 1.0 * Delta / PrevIn;
-let TurnGrowth = Calls
-    | summarize FirstIn = maxif(InTok, CallIdx == 1), N = max(CallIdx) by Agent, OperationId
-    | where N >= 2
-    | join kind=inner (Calls | project OperationId, CallIdx, LastIn = InTok)
-        on $left.OperationId == $right.OperationId, $left.N == $right.CallIdx
-    | extend GrowthMultiple = 1.0 * LastIn / FirstIn;
-TurnGrowth
-| summarize Turns = count(),
-            P50Multiple = round(percentile(GrowthMultiple, 50), 2),
-            P95Multiple = round(percentile(GrowthMultiple, 95), 2) by Agent
-| join kind=leftouter (Steps
-    | summarize P95GrowthRate = round(percentile(GrowthRate, 95), 2),
-                CarryFactor = round(1.0 * sum(Delta * Remaining) / sum(Delta), 2) by Agent) on Agent
-| project Agent, Turns, P50Multiple, P95Multiple, P95GrowthRate, CarryFactor
-```
+SQL: `queries/metrics/C2.sql`의 `turn_growth`, `growth_steps`.
 
 **쿼리: Tool별 결과 크기.** `ToolCallResult` 원문 길이의 tool별 p50, p95를 구한다. 결과가 큰 tool(C2)을 특정한다.
 
-```kusto
-Tools
-| join kind=inner (Content
-                   | where isnotempty(ToolCallResult)
-                   | project SpanId, ResultChars = strlen(ToolCallResult)) on $left.Id == $right.SpanId
-| summarize Calls = count(), P50Chars = percentile(ResultChars, 50),
-            P95Chars = percentile(ResultChars, 95) by ToolName
-| order by P95Chars desc
-```
+SQL: `queries/metrics/C2.sql`의 `result_size`, `result_carry`.
 
 - **판정**
   - 턴 내 Input 증가 배수 p50이 2 이상이면, 턴 안에서 Input이 두 배 넘게 늘어나는 것이므로 이 증상이 있다고 본다(초기값).
@@ -133,19 +70,9 @@ Tools
 
 **쿼리: 검색 결과 품질.** `retrieval` span의 반환 문서를 펼쳐 검색당 문서 수, top\_k, 저점수 문서 비율, 턴 내 중복 문서 수를 구한다. 검색 컨텍스트 과다(C3)를 확인한다.
 
-```kusto
-Spans
-| where Op == "retrieval"
-| extend TopK = toint(Properties["gen_ai.retrieval.top_k"]),
-         Docs = parse_json(tostring(Properties["gen_ai.retrieval.documents"]))
-| mv-expand Doc = Docs
-| extend DocId = tostring(Doc.id), Score = todouble(Doc.score)
-| summarize Searches = dcount(Id), ReturnedDocs = count(), AvgTopK = avg(TopK),
-            LowScoreShare = round(1.0 * countif(Score < 0.5) / count(), 3),
-            DupInTurn = count() - dcount(strcat(OperationId, "|", DocId))
-```
+SQL: `queries/metrics/C3.sql`의 `retrieval_quality`, `search_result`.
 
-점수 임계값(위 예시는 0.5)은 검색 엔진의 점수 척도에 맞춰 바꾼다. BM25, 벡터 유사도, semantic reranker의 척도가 서로 다르다.
+저점수 기준(`config/thresholds.csv`의 `low_score`, 0.5)은 검색 엔진의 점수 척도에 맞춰 바꾼다. BM25, 벡터 유사도, semantic reranker의 척도가 서로 다르다.
 
 - **판정**: 검색당 결과 토큰이 크고, 저점수·중복 문서 비율이 0.5 이상이면(고점수 문서가 과반이 아니면) C3 후보로 올린다. 결과가 크더라도 대부분 고점수이고 응답에 인용되면 정상이다.
 - **낭비 추정**: (저점수 + 중복 문서 토큰) × 이후 남은 호출 수 × P\_eff.

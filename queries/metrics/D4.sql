@@ -1,10 +1,11 @@
 -- D4: 에이전트 간 컨텍스트 중복. 하위 에이전트 = 루트가 아닌 invoke_agent span.
 -- 하위 첫 호출 Input과, 위임 직전 상위 에이전트 호출의 Input을 짝지어 비교한다.
 -- 가정: 하위 에이전트의 LLM 호출 span이 그 invoke_agent span 아래에 달린다(call_owner가 거슬러 올라간다).
+-- 하위 invoke_agent의 부모가 위임 tool span이어도 sub_agents.ParentRunSpanId가 위임한 상위 에이전트 실행을 찾는다.
 
 -- @query delegation
 WITH subfirst AS (
-  SELECT s.OperationId, s.SubSpanId, s.ParentId, s.SubAgent, c.InTok AS SubFirstIn, c.TimeGenerated AS FirstAt,
+  SELECT s.OperationId, s.SubSpanId, s.ParentRunSpanId, s.SubAgent, c.InTok AS SubFirstIn, c.TimeGenerated AS FirstAt,
          (SELECT count(*) FROM calls k WHERE k.OwnerSpanId = s.SubSpanId AND k.OperationId = s.OperationId) AS SubCalls
   FROM sub_agents s
   JOIN call_steps c ON c.OwnerSpanId = s.SubSpanId AND c.OperationId = s.OperationId AND c.RunIdx = 1),
@@ -12,7 +13,7 @@ pc AS (SELECT OperationId, OwnerSpanId, TimeGenerated, InTok, Agent AS ParentAge
 paired AS (
   SELECT f.*, p.InTok AS ParentIn, p.ParentAgent
   FROM subfirst f ASOF LEFT JOIN pc p
-    ON f.OperationId = p.OperationId AND f.ParentId = p.OwnerSpanId AND f.FirstAt >= p.TimeGenerated),
+    ON f.OperationId = p.OperationId AND f.ParentRunSpanId = p.OwnerSpanId AND f.FirstAt >= p.TimeGenerated),
 cr AS (SELECT Agent, 1.0 * sum(CacheTok) / nullif(sum(InTok), 0) AS r, avg(PIn) AS PIn, avg(PCache) AS PCache
        FROM calls GROUP BY 1)
 SELECT p.SubAgent, count(*) AS Delegations, any_value(s.STok) AS SubSa,

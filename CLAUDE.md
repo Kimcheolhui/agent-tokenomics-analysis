@@ -8,7 +8,7 @@
 
 | 경로 | 내용 | 원본 |
 | --- | --- | --- |
-| `docs/diagnosis-guide.md` | 진단 가이드. 문제 범주 6개, 증상 → 원인 매핑, 원인 25개(A1–F4)별 지표·KQL·판정·낭비 추정식 | [Claude Docs](https://claude.ai/artifact/3X9qWuyUWeXDrTkECgfF6G) |
+| `docs/diagnosis-guide.md` | 진단 가이드. 문제 범주 6개, 증상 → 원인 매핑, 원인 25개(A1–F4)별 지표(SQL 위치)·판정·낭비 추정식 | [Claude Docs](https://claude.ai/artifact/3X9qWuyUWeXDrTkECgfF6G) |
 | `report/token-diagnosis-report.html` | 진단 보고서 HTML 템플릿. 예시 데이터 포함 | [Artifact](https://claude.ai/artifact/YNvRjVVwTMxiym5VeFCma8) |
 | `docs/backlog.md` | Skill로 만들기 전에 정리할 일 5개. 의존 순서대로 | — |
 | `docs/data-contract.md` | CSV 스키마 계약. 추출 파일별 컬럼, 원인별 필요 파일, 텔레메트리 밖의 입력 | — |
@@ -22,10 +22,11 @@
 | `docs/data-contract.md`, `report-schema.md`, `build-mapping.md`, `metrics-notes.md` | CSV 스키마, REPORT 스키마, 지표 → REPORT 대응과 `review.json`, 가이드와 SQL이 다른 곳 | — |
 | `docs/writing-style.md`, `scripts/lint_text.py` | REPORT 문체 규칙(비유·AI체 제외)과 검사기 | — |
 | `docs/roadmap.md` | skill 완성까지의 단계와 설계 결정 | — |
+| `docs/telemetry-reference.md` | 공식 문서(OTel GenAI 규약, Azure Monitor 테이블, Foundry)와 대조한 결과. 고친 가정과 확인하지 못한 것 | — |
 | `skill/agent-tokenomics-diagnosis/` | 완성된 Agent skill. `SKILL.md`만 직접 편집하고 나머지는 `scripts/build_skill.py`로 생성한다 | — |
 | `tests/e2e.py` | 합성 데이터로 skill 스크립트를 처음부터 끝까지 검증한다 | — |
 
-진단은 Log Analytics에서 CSV를 한 번 내린 뒤 로컬에서 산출한다. 쿼리를 매번 실행하지 않는다. 가이드 섹션 3의 KQL은 아직 본문에 인라인으로 남아 있고, 분리는 백로그 5번에서 다룬다.
+진단은 Log Analytics에서 CSV를 한 번 내린 뒤 로컬에서 산출한다. 쿼리를 매번 실행하지 않는다. 지표 산출 쿼리는 `queries/metrics/*.sql` 한 곳에만 있다. 가이드는 쿼리 이름과 SQL 위치만 적고 SQL을 옮겨 적지 않는다. KQL은 로그를 내려받는 `queries/export/*.kql`에만 있다.
 
 두 원본은 claude.ai에 남아 있다. 이 폴더의 파일을 고친 뒤로는 이 폴더가 기준이고, 원본은 더 이상 동기화하지 않는다.
 
@@ -33,7 +34,7 @@
 
 - 문서는 **진단 성격**이다. 평가 절차(Part A), 조치 방향, 부록은 넣지 않기로 했다.
 - 구성: 공통 전제 → 1. 문제 범주 개요 → 2. 증상 → 후보 원인 매핑 → 3. 문제 카탈로그(A–F).
-- 카탈로그 항목 템플릿: 정의, 확인 방법([T] 텔레메트리 / [C] `AppGenAIContent` 원문 / [S] 정의·코드·설정 리뷰), 지표와 산출(KQL), 판정과 감별, 낭비 추정식.
+- 카탈로그 항목 템플릿: 정의, 확인 방법([T] 텔레메트리 / [C] `AppGenAIContent` 원문 / [S] 정의·코드·설정 리뷰), 지표와 산출(쿼리 이름과 SQL 위치), 판정과 감별, 낭비 추정식.
 - 지표는 추상적으로 쓰지 않는다. 계산식이나 Application Insights의 실제 속성·컬럼 이름으로 산출 방법을 적는다.
 - 모든 쿼리 블록 앞에 `**쿼리: 이름.**`과 목적을 한두 문장으로 붙인다.
 - 턴 비용 식: `Cost_turn = Σ[(I_i − C_i)·P_in + C_i·P_cache + O_i·P_out]`, `I_i = S + H_i + T_i + U`. 고정 Input은 `S`(범주 F와 헷갈리지 않게 F를 쓰지 않는다).
@@ -89,15 +90,14 @@ python3 scripts/build_skill.py                                                  
 
 ## 남은 일과 열린 질문
 
-- KQL은 실제 고객 데이터로 실행해 보지 않았다. 먼저 공통 전제의 "속성 키 확인" 쿼리로 `cache_read`, `reasoning`, `conversation.id` 키가 쌓이는지 확인한다.
+- 먼저 `queries/export/00-precheck-keys.kql`로 `cache_read`, `reasoning`, `conversation.id` 키가 쌓이는지, `01-precheck-sampling.kql`로 샘플링이 있는지 확인한다.
 - 증상 "턴 중간에 캐시율이 떨어진다"는 A 공통 캐시 달성률을 두 번째 이후 호출로 좁힌 같은 지표라서 같은 기준 0.7을 쓴다.
-- `gen_ai.response.finish_reasons`의 tool 호출 값을 `tool_calls`로 가정했다. 실제 값을 확인해야 한다.
+- `gen_ai.response.finish_reasons`는 OTel 규약상 문자열 배열이고 OTel 예시의 tool 호출 값은 `tool_calls`다(`docs/telemetry-reference.md`). 고객 환경의 실제 값은 확인해야 한다.
 - 턴 1개 = trace 1개 가정을 고객 앱에서 확인해야 한다.
-- gen_ai 속성은 OTel에서 아직 Development 단계라 이름이 바뀔 수 있다(예: `cache_creation` → `cache_write`).
+- gen_ai 속성은 OTel에서 아직 Development 단계라 이름이 바뀔 수 있다. `cache_creation`은 이미 `cache_write`로 바뀌었다.
 - **추출 KQL 9개는 실제 Log Analytics에서 실행해 보지 않았다.** DuckDB 쪽(뷰·지표 SQL·빌더)은 합성 데이터로만 검증했다. 합성 데이터는 내가 심은 문제만 검증하며, 실제 텔레메트리의 모양과 다를 수 있다.
 - 가이드에 수치 기준이 없는 판정 12개는 임의 수치를 두지 않았다(2026-11-09). 가이드 문구에서 유도(C3 0.5, E4·F1·F2 "반복" = 2건 이상, 턴 중간 캐시율 = A 공통 0.7), 기준 집단과의 단측 검정(A3·A5·A6·D1, 유의수준 0.01), 판정 보류(D2·D3·F3) 중 하나로 처리한다. 검정은 크기를 보지 않아 표본이 크면 작은 차이도 `후보`가 된다. 합성 데이터에서 심지 않은 A3·F2가 `후보`로 나온다. 목록은 `docs/metrics-notes.md`에 있다.
 - 가이드와 SQL이 다른 정의를 쓰는 곳 6개는 `docs/metrics-notes.md`에 있다. D4 전달 비율은 분모에서 S_parent를 빼도록 가이드 정의를 고쳤다(2026-11-09).
-- 원본 가이드(`docs/diagnosis-guide.md`)의 KQL은 인라인으로 남아 있고 SQL과 따로 있다. 둘이 어긋나지 않게 하려면 한쪽을 기준으로 정해야 한다.
 
 ## 작성 규칙
 

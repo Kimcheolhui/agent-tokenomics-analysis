@@ -65,9 +65,12 @@ def resolve(text, day_from, day_to, spans=None):
     return text
 
 
-def run_query(workspace, query):
+def run_query(workspace, query, timespan=None):
     cmd = ["az", "monitor", "log-analytics", "query",
            "--workspace", workspace, "--analytics-query", query, "--output", "json"]
+    # Basic 요금제 테이블(AppGenAIContent)이 들어간 쿼리는 쿼리 안의 시간 조건과 별개로 timespan을 명시해야 한다
+    if timespan:
+        cmd += ["--timespan", timespan]
     p = subprocess.run(cmd, capture_output=True, text=True)
     if p.returncode != 0:
         raise RuntimeError(p.stderr.strip() or "az 호출이 실패했다")
@@ -128,7 +131,7 @@ def main():
         if unknown:
             ap.error(f"모르는 쿼리 이름: {', '.join(unknown)}. 있는 것: {', '.join(queries)}")
     else:
-        wanted = [n for n, q in queries.items() if not q["sensitive"] and n != "precheck-keys"]
+        wanted = [n for n, q in queries.items() if not q["sensitive"] and not n.startswith("precheck")]
 
     spans = None
     if a.spans:
@@ -157,8 +160,12 @@ def main():
                 print(f"\n----- {name} {d0} -----\n{query}")
                 continue
 
+            # Basic 테이블이 들어간 쿼리는 최근 30일까지만 조회된다
+            if "AppGenAIContent" in query and (dt.date.today() - d0).days > 30:
+                print(f"[warn] {name} {d0}: AppGenAIContent는 Basic 테이블이라 30일보다 오래된 날은 조회되지 않는다. "
+                      "검색 작업(search job)으로 따로 내려야 한다", file=sys.stderr)
             try:
-                rows = run_query(a.workspace, query)
+                rows = run_query(a.workspace, query, f"{d0.isoformat()}T00:00:00Z/{d1.isoformat()}T00:00:00Z")
             except Exception as e:                      # noqa: BLE001
                 print(f"[fail] {name} {d0}: {e}", file=sys.stderr)
                 failures.append((name, d0.isoformat()))

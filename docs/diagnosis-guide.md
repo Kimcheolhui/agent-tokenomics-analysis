@@ -15,7 +15,7 @@
 5. 섹션 3에서 해당 항목의 지표를 산출한다.
 6. 판정 기준과 감별로 원인을 확정하고, 낭비 추정식으로 크기를 매긴다.
 
-데이터를 매번 Log Analytics에서 쿼리하지 않고 CSV로 한 번 내려 로컬에서 산출하는 방법은 `docs/data-contract.md`에 있다. 이 가이드의 KQL은 같은 지표를 정의하는 기준이고, 로컬 산출은 `queries/metrics/`의 SQL이 같은 정의를 따른다.
+데이터를 매번 Log Analytics에서 쿼리하지 않고 CSV로 한 번 내려 로컬에서 산출하는 방법은 `docs/data-contract.md`에 있다. 지표 산출은 `queries/metrics/`의 SQL이 기준이다. 가이드에는 SQL을 옮겨 적지 않고 쿼리 이름과 SQL 위치만 적는다. 로그를 내려받는 KQL은 `queries/export/`에만 있다.
 
 ### 분석 단위
 
@@ -30,7 +30,7 @@
 
 ### 텔레메트리 위치
 
-모든 쿼리는 Log Analytics workspace 스키마로 작성한다. content 테이블인 `AppGenAIContent`가 workspace 테이블이기 때문이다.
+추출 쿼리는 Log Analytics workspace 스키마로 작성한다. content 테이블인 `AppGenAIContent`가 workspace 테이블이기 때문이다.
 
 - `AppDependencies`: GenAI span 대부분. 속성은 `Properties`, trace는 `OperationId`, span은 `Id`, 부모는 `ParentId`, 성공 여부는 `Success`.
 - `AppRequests`: server kind로 기록된 span(일부 `invoke_agent`). `AppDependencies`와 union해서 조회한다.
@@ -62,14 +62,7 @@ gen\_ai 속성은 아직 Development 단계라 이름이 바뀐다. 예를 들�
 
 사전 점검 P1~P4, P9에 쓰는 아래 쿼리로 LLM 호출(chat) span에 실제로 기록되는 **속성 키**를 확인한다. 결과에는 키별로 그 키가 들어 있는 span 수가 나온다.
 
-```kusto
-AppDependencies
-| where TimeGenerated > ago(1d)
-| where tostring(Properties["gen_ai.operation.name"]) == "chat"
-| take 500
-| mv-expand Key = bag_keys(Properties)
-| summarize Spans = count() by tostring(Key)
-```
+추출 쿼리: `queries/export/00-precheck-keys.kql`.
 
 `cache_read`나 `reasoning` 키가 없으면 그 키를 쓰는 3장 지표는 산출할 수 없다(cache\_read: A의 캐시율·달성률과 A1·A5·A6 히트율, reasoning: E2 Reasoning 비중과 E1·D3의 가시 출력). 이 경우 진단 결과에 "계측 부재"로 기록한다.
 
@@ -83,24 +76,16 @@ AppDependencies
 | P2 | 속성 키 `reasoning` 수집 | 같은 쿼리, `WithReasoning` | E2 Reasoning 비중, E1·D3의 가시 출력 |
 | P3 | 속성 키 `gen_ai.conversation.id` 수집 | 같은 쿼리, `WithConvId` | C1 전체, F3 빠른 재입력 비율, 대화 기준 지표 |
 | P4 | `gen_ai.agent.name` 이 chat span에 기록되는가 | `WithAgentOwner`와 `Agent` 컬럼 비교 | B1·B4·D4의 에이전트 귀속. 기록되지 않으면 호출이 루트 에이전트로 집계된다 |
-| P5 | `finish_reasons` 의 tool 호출 값 | `Calls \| summarize count() by Finish` | D1·D2·D3·E1·E4·F2의 호출 유형 분류. 쿼리는 `tool_calls`를 가정한다 |
-| P6 | 턴 1개 = trace 1개 | 아래 "턴·trace 점검" 쿼리 | 턴 단위 지표 전체 (CallIdx, 턴 비용, 꼬리 비중) |
+| P5 | `finish_reasons` 의 tool 호출 값 | `SELECT Finish, count(*) FROM calls GROUP BY 1` | D1·D2·D3·E1·E4·F2의 호출 유형 분류. SQL은 `tool_calls`를 가정한다 |
+| P6 | 턴 1개 = trace 1개 | 아래 "턴·trace 점검"의 `turn_trace_check` | 턴 단위 지표 전체 (CallIdx, 턴 비용, 꼬리 비중) |
 | P7 | `AppGenAIContent` 접근과 content recording | 테이블이 비어 있지 않은가, Privileged Monitoring Data Reader 역할 | [C] 지표 전체: A1·A2 변형 수, B1~B3 정의 크기, C2 결과 크기, D1 중복, D3 다양성, F3 메시지 |
 | P8 | 응답 모델명이 `ModelParams`와 일치 | 로컬 `unpriced_calls`, 또는 `Calls \| where isnull(PIn)` | 일치하지 않는 호출은 `Cost`가 비어 비용 합계에서 경고 없이 빠진다 |
 | P9 | `gen_ai.request.max_tokens` 기록 | `WithMaxTokens` | E3 max_tokens 미설정 비율. 미기록과 미설정을 구분할 수 없다 |
 
 **쿼리: 턴·trace 점검.** invoke_agent span이 trace당 몇 개인지, 한 trace가 여러 대화를 묶는지 센다. 대화 전체를 trace 하나로 묶는 앱은 `TracesWithMultiConv`가 크게 나오고, 이 경우 턴 단위 지표가 틀어진다. 반대로 한 턴을 여러 trace로 나누는 경우는 텔레메트리로 판별할 수 없으므로 \[S\]로 앱 구조를 확인한다.
 
-```kusto
-union AppDependencies, AppRequests
-| where TimeGenerated > ago(1d)
-| where tostring(Properties["gen_ai.operation.name"]) == "invoke_agent"
-| summarize InvokeSpans = count(), Convs = dcount(tostring(Properties["gen_ai.conversation.id"])) by OperationId
-| summarize Traces = count(), P50Spans = percentile(InvokeSpans, 50), P99Spans = percentile(InvokeSpans, 99),
-            TracesWithMultiConv = countif(Convs > 1)
-```
+SQL: `queries/views.sql`의 `turn_trace_check` (추출한 `agent_spans`로 계산한다).
 
-이 쿼리는 실제 Log Analytics에서 실행해 확인하지 않았다.
 
 점검에서 `cache_read`나 `reasoning` 키가 없으면 해당 지표는 "계측 부재"로 기록한다. P6가 실패하면 턴 단위 지표는 신뢰할 수 없으므로 앱 구조를 확인하고 진단 범위를 조정한다.
 
@@ -120,57 +105,11 @@ union AppDependencies, AppRequests
 
 ### 공통 쿼리 정의
 
-섹션 3의 모든 쿼리는 아래 정의를 앞에 붙여 실행한다. `ModelParams`에는 고객이 쓰는 모델의 Azure 단가(USD / 1M 토큰)와 캐시 파라미터를 채운다. 응답 모델명에는 버전 접미사가 붙을 수 있으니 실제 값에 맞춘다.
+섹션 3의 모든 SQL은 아래 정의(`queries/views.sql`)를 기반으로 한다. `ModelParams`(`config/model-params.csv`)에는 고객이 쓰는 모델의 Azure 단가(USD / 1M 토큰)와 캐시 파라미터를 채운다. 응답 모델명에는 버전 접미사가 붙을 수 있으니 실제 값에 맞춘다.
 
-**쿼리: 공통 정의.** 분석 기간(T0), 모델별 단가·캐시 파라미터(ModelParams), GenAI span(Spans), 턴(Turns), LLM 호출(Calls), Tool 호출(Tools), 원문(Content)을 정의한다. 섹션 3의 모든 쿼리가 같은 분석 단위와 비용 계산식을 쓰게 하려는 용도다. Calls에는 호출별 비용(Cost), 턴 안 호출 순번(CallIdx), 모델 캐시 파라미터가 붙는다. Cacheable은 캐시 가능 토큰을 계산하는 함수다.
+**공통 정의.** 모델별 단가·캐시 파라미터(ModelParams), 턴(Turns), LLM 호출(Calls), Tool 호출(Tools), 원문(Content)을 정의한다. 섹션 3의 모든 지표가 같은 분석 단위와 비용 계산식을 쓰게 하려는 용도다. Calls에는 호출별 비용(Cost), 턴 안 호출 순번(CallIdx), 모델 캐시 파라미터가 붙는다. `cacheable()` 매크로는 캐시 가능 토큰을 계산한다.
 
-```kusto
-let T0 = ago(14d);
-// 모델별 단가(USD / 1M 토큰)와 캐시 파라미터. 값은 "모델별 캐시 파라미터" 표를 따른다.
-let ModelParams = datatable(Model:string, PIn:real, PCache:real, PWrite:real, POut:real,
-                            MinTok:long, Round128:bool, WindowMin:real, RpmLimit:long)
-[
-    "<응답 모델명>", 0.0, 0.0, 0.0, 0.0, 1024, true, 5.0, 15
-];
-let Cacheable = (x:long, minTok:long, round128:bool) {
-    iff(x < minTok, long(0), iff(round128, (x / 128) * 128, x))
-};
-let Spans = union AppDependencies, AppRequests
-    | where TimeGenerated > T0
-    | extend Op = tostring(Properties["gen_ai.operation.name"]);
-let Turns = Spans
-    | where Op == "invoke_agent"
-    | summarize arg_min(TimeGenerated, *) by OperationId
-    | project OperationId, TurnStart = TimeGenerated, TurnOk = Success,
-              RootAgent = tostring(Properties["gen_ai.agent.name"]),
-              TurnConv  = tostring(Properties["gen_ai.conversation.id"]);
-let Calls = Spans
-    | where Op in ("chat", "text_completion", "generate_content")
-    | extend
-        Model     = tostring(Properties["gen_ai.response.model"]),
-        InTok     = tolong(Properties["gen_ai.usage.input_tokens"]),
-        CacheTok  = coalesce(tolong(Properties["gen_ai.usage.cache_read.input_tokens"]), 0),
-        WriteTok  = coalesce(tolong(Properties["gen_ai.usage.cache_write.input_tokens"]),
-                             tolong(Properties["gen_ai.usage.cache_creation.input_tokens"]), 0),
-        OutTok    = tolong(Properties["gen_ai.usage.output_tokens"]),
-        ReasonTok = coalesce(tolong(Properties["gen_ai.usage.reasoning.output_tokens"]), 0),
-        Finish    = tostring(Properties["gen_ai.response.finish_reasons"]),
-        Endpoint  = coalesce(tostring(Properties["server.address"]), Target),
-        CallAgent = tostring(Properties["gen_ai.agent.name"]),
-        CallConv  = tostring(Properties["gen_ai.conversation.id"])
-    | join kind=leftouter Turns on OperationId
-    | join kind=leftouter ModelParams on Model
-    | extend Agent = coalesce(CallAgent, RootAgent), Conv = coalesce(CallConv, TurnConv)
-    | extend Cost = ((InTok - CacheTok - WriteTok) * PIn + CacheTok * PCache
-                     + WriteTok * PWrite + OutTok * POut) / 1e6
-    | sort by OperationId asc, TimeGenerated asc
-    | extend CallIdx = row_number(1, prev(OperationId) != OperationId);
-let Tools = Spans
-    | where Op == "execute_tool"
-    | extend ToolName = tostring(Properties["gen_ai.tool.name"]),
-             ToolErr  = tostring(Properties["error.type"]);
-let Content = AppGenAIContent | where TimeGenerated > T0;
-```
+공통 정의는 추출 쿼리 `queries/export/10-calls.kql`(Calls)과 로컬 뷰 `queries/views.sql`(Turns, CallIdx, Cost, Tools, Content, ModelParams)에 있다. 이 가이드의 지표는 모두 그 뷰 위에서 `queries/metrics/*.sql`로 계산한다.
 
 ### 표기
 
@@ -230,7 +169,7 @@ B의 낭비 크기는 A의 결과에 달려 있다. 고정 Input S는 캐시가 
 
 ## 3. 문제 카탈로그
 
-항목마다 정의, 확인 방법, 지표와 산출, 판정과 감별, 낭비 추정을 둔다. 쿼리는 모두 섹션 "공통 쿼리 정의" 뒤에 이어서 실행한다.
+항목마다 정의, 확인 방법, 지표와 산출, 판정과 감별, 낭비 추정을 둔다. SQL은 모두 섹션 "공통 쿼리 정의"의 뷰 위에서 실행한다.
 
 ## A. Prefix 변동 (캐시 미스)
 
@@ -244,17 +183,7 @@ B의 낭비 크기는 A의 결과에 달려 있다. 고정 Input S는 캐시가 
 
 **쿼리: 에이전트별 캐시율·캐시 달성률.** 실제 캐시 히트 토큰을 이론 상한과 비교해, A 범주를 점검할지 판단한다. 첫 줄의 S 표에는 3-B에서 측정한 에이전트별 고정 Input 토큰을 넣는다.
 
-```kusto
-let S = datatable(Agent:string, STok:long) [ "<에이전트명>", 0 ];   // 3-B 측정값
-Calls
-| extend PrevIn = iff(CallIdx > 1, prev(InTok), long(null))
-| join kind=leftouter S on Agent
-| extend Theo = min_of(iff(CallIdx == 1, Cacheable(STok, MinTok, Round128),
-                                         Cacheable(PrevIn, MinTok, Round128)), InTok)
-| summarize Input = sum(InTok), Actual = sum(CacheTok), Theoretical = sum(Theo) by Agent
-| extend CacheRate   = round(1.0 * Actual / Input, 3),
-         Achievement = round(1.0 * Actual / Theoretical, 3)
-```
+SQL: `queries/metrics/A-common.sql`의 `agent_cache`, `overall`, `by_callidx`.
 
 - 달성률이 0.7 미만이면 A1–A6을 점검한다.
 - 달성률이 1을 넘을 수 있다. 같은 대화의 이전 턴 이력까지 히트한 경우이며 정상이다. 턴 첫 호출의 이론치를 고정부로만 잡았기 때문이다.
@@ -273,33 +202,11 @@ Calls
 
 **쿼리: 보존 시간 내 첫 호출 미스율.** 만료(A5)와 쏠림(A6)이 생기지 않는 조건의 턴 첫 호출만 골라 캐시 미스 비율을 구한다. 이 조건에서는 캐시가 살아 있어야 하므로, 미스가 많으면 prefix 자체가 바뀐다고 볼 수 있다. A1 판정의 1차 신호로 쓴다.
 
-```kusto
-let S = datatable(Agent:string, STok:long) [ "<에이전트명>", 0 ];   // 3-B 측정값
-let Rpm = Calls | summarize MinuteCalls = count() by Agent, Minute = bin(TimeGenerated, 1m);
-Calls
-| where CallIdx == 1
-| sort by Agent asc, TimeGenerated asc
-| extend GapMin = iff(prev(Agent) == Agent,
-                      datetime_diff('second', TimeGenerated, prev(TimeGenerated)) / 60.0, real(null)),
-         Minute = bin(TimeGenerated, 1m)
-| join kind=inner S on Agent
-| join kind=leftouter Rpm on Agent, Minute
-| where STok >= MinTok and GapMin < WindowMin and MinuteCalls <= RpmLimit
-| summarize WarmFirstCalls = count(), Miss = countif(CacheTok == 0) by Agent
-| extend WarmMissRate = round(1.0 * Miss / WarmFirstCalls, 3)
-```
+SQL: `queries/metrics/A1.sql`의 `warm_first_miss`, `inturn_misses`.
 
 **쿼리: System prompt 변형 수.** 같은 에이전트의 `SystemInstructions`가 몇 가지로 기록됐는지 센다. 전체 변형(Variants)과 앞 4,000자 변형(HeadVariants)을 함께 보고, 동적 값이 앞부분에 있는지 확인한다.
 
-```kusto
-Content
-| where isnotempty(SystemInstructions)
-| summarize Records = count(),
-            Variants = dcount(hash_sha256(SystemInstructions)),
-            HeadVariants = dcount(hash_sha256(substring(SystemInstructions, 0, 4000)))
-  by AgentName
-| extend VariantRatio = round(1.0 * Variants / Records, 3)
-```
+SQL: `queries/metrics/A1.sql`의 `sys_variants`.
 
 - **판정**
   - 보존 시간 내 첫 호출 미스율(WarmMissRate)이 0.2 이상이고 VariantRatio가 0.1 이상이면 A1로 판정한다. 변형 2건을 꺼내 첫 차이 위치를 확인하면 원인 변수를 특정할 수 있다.
@@ -319,15 +226,7 @@ Content
 
 **쿼리: Tool 정의 변형 수.** `ToolDefinitions` 원문의 변형 수와 tool 이름 집합의 변형 수를 비교한다. 순서·설명 변동(A2)과 tool 목록 자체의 변동을 구분하려는 용도다.
 
-```kusto
-Content
-| where isnotempty(ToolDefinitions)
-| extend Names = tostring(array_sort_asc(extract_all(@'"name"\s*:\s*"([^"]+)"', ToolDefinitions)))
-| summarize Records = count(),
-            RawVariants = dcount(hash_sha256(ToolDefinitions)),
-            NameSetVariants = dcount(hash_sha256(Names))
-  by AgentName
-```
+SQL: `queries/metrics/A2.sql`의 `tooldef_variants`, `variant_share`.
 
 - **판정**
   - RawVariants가 NameSetVariants보다 크면, 같은 tool 집합인데 순서나 설명이 바뀐 것이다. A2로 판정한다.
@@ -345,20 +244,7 @@ Content
 
 **쿼리: 이력 축소 이벤트와 전후 캐시율.** 같은 대화에서 Input이 직전보다 줄어든 호출을 찾고, 그 직후 캐시율을 평상시와 비교한다. 이력 편집이 캐시를 깨는지(A3) 확인한다.
 
-```kusto
-Calls
-| where isnotempty(Conv)
-| sort by Conv asc, TimeGenerated asc
-| extend PrevIn = iff(prev(Conv) == Conv, prev(InTok), long(null)),
-         Compacted = tobool(Properties["gen_ai.conversation.compacted"])
-| extend Shrink = PrevIn > InTok
-| summarize Calls = count(),
-            ShrinkEvents = countif(Shrink),
-            CompactedCalls = countif(Compacted),
-            HitAfterShrink = round(avgif(1.0 * CacheTok / InTok, Shrink), 3),
-            HitNormal = round(avgif(1.0 * CacheTok / InTok, not(Shrink) and CallIdx > 1), 3)
-  by Agent
-```
+SQL: `queries/metrics/A3.sql`의 `shrink`, `conv_call_profile`.
 
 - **판정**
   - 축소 이벤트가 있고 HitAfterShrink가 HitNormal보다 낮으면(단측 검정) A3 후보로 올린다. \[C\]로 편집 지점을 확인해 A3로 판정한다.
@@ -374,15 +260,7 @@ Calls
 
 **쿼리: 캐시 불가 호출 비중.** Input이 모델의 MinTok보다 짧아 캐시 대상이 될 수 없는 호출의 건수와 비용 비중을 구한다. A4의 영향 크기를 가늠한다.
 
-```kusto
-Calls
-| extend Small = InTok < MinTok
-| summarize Calls = count(), Cost = sum(Cost),
-            SmallCalls = countif(Small), SmallCost = sumif(Cost, Small)
-  by Agent
-| extend SmallCallShare = round(1.0 * SmallCalls / Calls, 3),
-         SmallCostShare = round(SmallCost / Cost, 3)
-```
+SQL: `queries/metrics/A4.sql`의 `small_calls`.
 
 - **판정**
   - S\_a < MinTok이고 턴 첫 호출의 CacheTok이 항상 0이면 A4로 판정한다. A1과는 S\_a 크기로 구분한다.
@@ -399,21 +277,7 @@ Calls
 
 **쿼리: 요청 간격별 첫 호출 히트율.** 같은 에이전트의 연속된 턴 첫 호출 사이 간격을 모델 보존 시간(WindowMin)의 배수 구간으로 나눠 히트율을 비교한다. 보존 시간을 넘는 구간에서 히트율이 크게 낮아지는지로 캐시 만료(A5)를 확인한다.
 
-```kusto
-Calls
-| where CallIdx == 1
-| sort by Agent asc, TimeGenerated asc
-| extend GapMin = iff(prev(Agent) == Agent,
-                      datetime_diff('second', TimeGenerated, prev(TimeGenerated)) / 60.0, real(null))
-| where isnotnull(GapMin)
-| extend Bucket = case(GapMin < WindowMin,     "a. 보존 시간 안",
-                       GapMin < 2 * WindowMin, "b. 1–2배",
-                       GapMin < 6 * WindowMin, "c. 2–6배",
-                                               "d. 6배 이상")
-| summarize FirstCalls = count(), HitRate = round(1.0 * countif(CacheTok > 0) / count(), 3)
-  by Agent, Bucket
-| order by Agent asc, Bucket asc
-```
+SQL: `queries/metrics/A5.sql`의 `gap_hit`.
 
 - **판정**
   - "보존 시간 밖" 구간의 히트율이 "보존 시간 안" 구간보다 낮으면(단측 검정) A5로 판정한다.
@@ -430,23 +294,11 @@ Calls
 
 **쿼리: 엔드포인트별 히트율.** 에이전트가 호출한 엔드포인트별로 캐시 히트율을 비교해 트래픽 분산(A6)을 확인한다.
 
-```kusto
-Calls
-| summarize Calls = count(), HitRate = round(1.0 * countif(CacheTok > 0) / count(), 3)
-  by Agent, Endpoint
-```
+SQL: `queries/metrics/A6.sql`의 `endpoint_hit`.
 
 **쿼리: 분당 요청 수 구간별 히트율.** 에이전트별 분당 LLM 호출 수를 RpmLimit 대비 구간으로 나눠 히트율을 비교한다. RpmLimit을 넘는 구간에서 생기는 쏠림(A6)을 확인한다.
 
-```kusto
-Calls
-| summarize Rpm = count(), Hits = countif(CacheTok > 0), RpmLimit = any(RpmLimit)
-  by Agent, Minute = bin(TimeGenerated, 1m)
-| extend RpmBucket = case(Rpm <= RpmLimit,     "a. 기준 이하",
-                          Rpm <= 2 * RpmLimit, "b. 기준의 1–2배",
-                                               "c. 기준의 2배 초과")
-| summarize Minutes = count(), HitRate = round(1.0 * sum(Hits) / sum(Rpm), 3) by Agent, RpmBucket
-```
+SQL: `queries/metrics/A6.sql`의 `rpm_hit`.
 
 - **판정**
   - 한 에이전트가 여러 엔드포인트를 쓰고 최저 엔드포인트의 히트율이 최고 엔드포인트보다 낮으면(단측 검정) 분산으로 판정한다. 리전·배포 간 공유 여부는 문서에 명시되지 않았으므로 이 실측값으로 판단한다.
@@ -494,30 +346,15 @@ print(len(enc.encode(system_instructions)), len(enc.encode(tool_definitions_json
 
 **쿼리: 턴 첫 호출 Input 분포(측정법 3).** 턴 첫 호출 InTok의 1백분위수를 S\_a의 하한 근사로 쓴다. 실험 호출이나 원문으로 S\_a를 잴 수 없을 때의 대안이다.
 
-```kusto
-Calls
-| where CallIdx == 1
-| summarize FirstCalls = count(), P01 = percentile(InTok, 1), P50 = percentile(InTok, 50) by Agent
-```
+SQL: `queries/metrics/B-common.sql`의 `first_call_dist`.
 
 **고정 Input 비용 비중** = Σ(S\_a × 에이전트 a의 LLM 호출 수 × P\_eff) ÷ 전체 비용. 고정 Input이 비용에서 차지하는 비중이며, 0.3 이상이면 B 범주를 점검한다(초기값). P\_eff에 캐시 효과가 들어 있어서, 캐시가 잘 맞는 에이전트는 토큰이 커도 비중이 낮게 나온다.
 
 **쿼리: 고정 Input 비용 비중.** 에이전트별로 S\_a × LLM 호출 수 × P\_eff로 고정 Input 비용을 구하고, 그 에이전트 전체 비용 대비 비중을 계산한다. 전체 비중은 FixedCost 합 ÷ Cost 합으로 구한다. B 범주를 점검할지 판단할 때 쓴다.
 
-```kusto
-let S = datatable(Agent:string, STok:long) [ "<에이전트명>", 0 ];   // 측정법 1–3으로 구한 S_a
-Calls
-| summarize Calls = count(), Cost = sum(Cost),
-            CacheRate = 1.0 * sum(CacheTok) / sum(InTok),
-            PIn = any(PIn), PCache = any(PCache) by Agent
-| join kind=inner S on Agent
-| extend PEff = (1 - CacheRate) * PIn + CacheRate * PCache
-| extend FixedCost = STok * Calls * PEff / 1e6
-| project Agent, Calls, STok, CacheRate = round(CacheRate, 3), FixedCost, Cost,
-          FixedCostShare = round(FixedCost / Cost, 3)
-```
+SQL: `queries/metrics/B-common.sql`의 `fixed_share`, `overall`.
 
-한 에이전트가 여러 모델을 쓰면 단가를 `any()`로 하나만 가져오므로, 이 경우 Agent와 Model로 나눠 계산한다.
+한 에이전트가 여러 모델을 쓰면 그중 한 모델의 단가만 쓰므로, 이 경우 Agent와 Model로 나눠 계산한다.
 
 ### B1. 미사용 Tool 상시 전송
 
@@ -527,23 +364,7 @@ Calls
 
 **쿼리: Tool별 사용률.** 최근 `ToolDefinitions`에서 정의된 tool 목록을 뽑고, `execute_tool` span으로 실제 호출된 턴 수를 붙인다. 정의만 되어 있고 쓰이지 않는 tool(B1)을 찾는다.
 
-```kusto
-let TurnsByAgent = Calls | where CallIdx == 1 | summarize AgentTurns = count() by Agent;
-let Defined = Content
-    | where isnotempty(ToolDefinitions)
-    | summarize arg_max(TimeGenerated, ToolDefinitions) by Agent = AgentName
-    | mv-expand ToolName = extract_all(@'"name"\s*:\s*"([^"]+)"', ToolDefinitions) to typeof(string)
-    | project Agent, ToolName;
-let Used = Tools
-    | join kind=leftouter Turns on OperationId
-    | summarize UsedTurns = dcount(OperationId) by Agent = RootAgent, ToolName;
-Defined
-| join kind=leftouter Used on Agent, ToolName
-| join kind=leftouter TurnsByAgent on Agent
-| project Agent, ToolName, UsedTurns = coalesce(UsedTurns, 0),
-          UseRate = round(1.0 * coalesce(UsedTurns, 0) / AgentTurns, 4)
-| order by Agent asc, UseRate asc
-```
+SQL: `queries/metrics/B1.sql`의 `tool_use`.
 
 - **판정**
   - 관찰 기간(최소 2주) 동안 0회이거나 사용률 1% 미만이고, 해당 tool의 토큰이 크면 B1로 판정한다.
@@ -559,17 +380,7 @@ Defined
 
 **쿼리: Tool별 정의 크기.** 최근 `ToolDefinitions`를 tool 단위로 펼쳐 정의 전체와 description의 문자 수를 구한다. 다른 tool보다 유난히 긴 schema(B2)를 찾는다.
 
-```kusto
-Content
-| where isnotempty(ToolDefinitions)
-| summarize arg_max(TimeGenerated, ToolDefinitions) by AgentName
-| mv-expand T = parse_json(ToolDefinitions)
-| extend ToolName  = coalesce(tostring(T.name), tostring(T["function"].name)),
-         Chars     = strlen(tostring(T)),
-         DescChars = strlen(coalesce(tostring(T.description), tostring(T["function"].description)))
-| project AgentName, ToolName, Chars, DescChars
-| order by AgentName asc, Chars desc
-```
+SQL: `queries/metrics/B2.sql`의 `tool_schema_size`.
 
 - **판정**: 정의 크기가 같은 에이전트 tool 중앙값의 3배 이상이면 후보로 올린다. 리뷰에서 긴 enum, 반복 설명, 사용 예시가 대부분을 차지하면 B2로 판정한다.
 - **낭비 추정**: 리뷰로 산정한 축약 가능 토큰 × 에이전트 LLM 호출 수 × P\_eff.
@@ -585,12 +396,7 @@ Content
 
 **쿼리: 에이전트별 최신 System prompt.** 에이전트마다 가장 최근 `SystemInstructions` 원문과 길이를 꺼낸다. 토큰화와 구성 요소 리뷰(B3)의 입력으로 쓴다.
 
-```kusto
-Content
-| where isnotempty(SystemInstructions)
-| summarize arg_max(TimeGenerated, SystemInstructions) by AgentName
-| project AgentName, SysChars = strlen(SystemInstructions), SystemInstructions
-```
+SQL: `queries/metrics/B3.sql`의 `system_prompt_size`.
 
 - **판정**
   - 고정 Input 비용 비중이 0.3 이상이고, 리뷰에서 예시·참조 데이터·중복 규칙이 큰 비중이면 B3로 판정한다.
@@ -605,14 +411,7 @@ Content
 
 **쿼리: 에이전트별 고정 Input 크기.** 에이전트마다 System prompt 길이, tool 정의 길이, 정의된 tool 수를 구한다. 하위 에이전트끼리 비교해 중복(B4)을 찾는다.
 
-```kusto
-Content
-| where isnotempty(SystemInstructions) or isnotempty(ToolDefinitions)
-| summarize SysChars  = max(strlen(SystemInstructions)),
-            ToolChars = max(strlen(ToolDefinitions)),
-            ToolCount = max(array_length(extract_all(@'"name"\s*:\s*"([^"]+)"', ToolDefinitions)))
-  by AgentName
-```
+SQL: `queries/metrics/B4.sql`의 `agent_fixed_size`.
 
 - **판정**: 하위 에이전트 S\_a가 상위와 비슷하거나 공통 블록이 여러 에이전트에 반복되고, 하위 에이전트의 tool 사용률이 낮으면 B4로 판정한다.
 - **낭비 추정**: Σ(에이전트 a) (S\_a − 역할에 필요한 토큰) × 에이전트 a의 LLM 호출 수 × P\_eff.
@@ -632,47 +431,15 @@ Content
 
 **쿼리: 턴 순번별 첫 호출 Input.** 대화의 몇 번째 턴인지에 따라 첫 호출 InTok 중앙값이 어떻게 늘어나는지 선 그래프로 그린다. 이력에 상한이 있는지(C1) 확인한다.
 
-```kusto
-Calls
-| where CallIdx == 1 and isnotempty(Conv)
-| sort by Conv asc, TimeGenerated asc
-| extend TurnIdx = row_number(1, prev(Conv) != Conv)
-| where TurnIdx <= 30
-| summarize Convs = dcount(Conv), P50In = percentile(InTok, 50) by Agent, TurnIdx
-| order by Agent asc, TurnIdx asc
-| render linechart
-```
+SQL: `queries/metrics/C1.sql`의 `turn_idx_input`.
 
 **쿼리: 긴 대화의 비용 비중.** 대화당 턴 수 분포와, 턴 수 상위 10% 대화가 전체 비용에서 차지하는 비중을 구한다. C1의 영향 크기를 가늠한다.
 
-```kusto
-let ConvCost = Calls
-    | where isnotempty(Conv)
-    | summarize Turns = dcount(OperationId), Cost = sum(Cost) by Agent, Conv;
-ConvCost
-| join kind=inner (ConvCost | summarize P50Turns = percentile(Turns, 50),
-                                      P90Turns = percentile(Turns, 90) by Agent) on Agent
-| summarize P50Turns = any(P50Turns), P90Turns = any(P90Turns),
-            LongConvCostShare = round(sumif(Cost, Turns >= P90Turns) / sum(Cost), 3) by Agent
-```
+SQL: `queries/metrics/C1.sql`의 `conv_cost`.
 
 **쿼리: 턴 간 Input 증가 배수.** 에이전트별로 대화 길이의 p90에 해당하는 턴을 구하고, 그 턴의 첫 호출 InTok 중앙값을 1턴의 값과 비교한다. C1 판정 기준을 계산할 때 쓴다.
 
-```kusto
-let FirstCalls = Calls
-    | where CallIdx == 1 and isnotempty(Conv)
-    | sort by Conv asc, TimeGenerated asc
-    | extend TurnIdx = row_number(1, prev(Conv) != Conv);
-let P90Turn = FirstCalls
-    | summarize Turns = max(TurnIdx) by Agent, Conv
-    | summarize P90Turn = toint(percentile(Turns, 90)) by Agent;
-FirstCalls
-| summarize P50In = percentile(InTok, 50) by Agent, TurnIdx
-| join kind=inner P90Turn on Agent
-| summarize In1 = maxif(P50In, TurnIdx == 1), InP90 = maxif(P50In, TurnIdx == P90Turn),
-            P90Turn = any(P90Turn) by Agent
-| extend CrossTurnMultiple = round(1.0 * InP90 / In1, 2)
-```
+SQL: `queries/metrics/C1.sql`의 `cross_turn`.
 
 - **판정**
   - 턴 간 Input 증가 배수가 2 이상이면, 대화 길이 p90 시점에 이력이 기본 Input보다 커진 것이므로 C1로 판정한다(초기값). C2의 턴 내 증가 배수와 같은 기준이다.
@@ -693,42 +460,11 @@ FirstCalls
 
 **쿼리: 턴 내 Input 증가 배수와 호출당 증가율.** 턴 첫 호출 대비 마지막 호출의 Input 배수와, 연속 호출 사이 증가분(ΔIn)이 직전 Input에서 차지하는 비율을 에이전트별로 구한다. 재전송 계수도 함께 구한다. content 없이 C2를 진단할 때 쓴다.
 
-```kusto
-let TurnCalls = Calls | summarize N = max(CallIdx) by OperationId;
-let Steps = Calls
-    | extend PrevIn  = iff(CallIdx > 1, prev(InTok), long(null)),
-             PrevOut = iff(CallIdx > 1, prev(OutTok), long(null))
-    | where CallIdx > 1
-    | join kind=inner TurnCalls on OperationId
-    | extend Delta = InTok - PrevIn - PrevOut, Remaining = N - CallIdx + 1
-    | extend GrowthRate = 1.0 * Delta / PrevIn;
-let TurnGrowth = Calls
-    | summarize FirstIn = maxif(InTok, CallIdx == 1), N = max(CallIdx) by Agent, OperationId
-    | where N >= 2
-    | join kind=inner (Calls | project OperationId, CallIdx, LastIn = InTok)
-        on $left.OperationId == $right.OperationId, $left.N == $right.CallIdx
-    | extend GrowthMultiple = 1.0 * LastIn / FirstIn;
-TurnGrowth
-| summarize Turns = count(),
-            P50Multiple = round(percentile(GrowthMultiple, 50), 2),
-            P95Multiple = round(percentile(GrowthMultiple, 95), 2) by Agent
-| join kind=leftouter (Steps
-    | summarize P95GrowthRate = round(percentile(GrowthRate, 95), 2),
-                CarryFactor = round(1.0 * sum(Delta * Remaining) / sum(Delta), 2) by Agent) on Agent
-| project Agent, Turns, P50Multiple, P95Multiple, P95GrowthRate, CarryFactor
-```
+SQL: `queries/metrics/C2.sql`의 `turn_growth`, `growth_steps`.
 
 **쿼리: Tool별 결과 크기.** `ToolCallResult` 원문 길이의 tool별 p50, p95를 구한다. 결과가 큰 tool(C2)을 특정한다.
 
-```kusto
-Tools
-| join kind=inner (Content
-                   | where isnotempty(ToolCallResult)
-                   | project SpanId, ResultChars = strlen(ToolCallResult)) on $left.Id == $right.SpanId
-| summarize Calls = count(), P50Chars = percentile(ResultChars, 50),
-            P95Chars = percentile(ResultChars, 95) by ToolName
-| order by P95Chars desc
-```
+SQL: `queries/metrics/C2.sql`의 `result_size`, `result_carry`.
 
 - **판정**
   - 턴 내 Input 증가 배수 p50이 2 이상이면, 턴 안에서 Input이 두 배 넘게 늘어나는 것이므로 이 증상이 있다고 본다(초기값).
@@ -750,19 +486,9 @@ Tools
 
 **쿼리: 검색 결과 품질.** `retrieval` span의 반환 문서를 펼쳐 검색당 문서 수, top\_k, 저점수 문서 비율, 턴 내 중복 문서 수를 구한다. 검색 컨텍스트 과다(C3)를 확인한다.
 
-```kusto
-Spans
-| where Op == "retrieval"
-| extend TopK = toint(Properties["gen_ai.retrieval.top_k"]),
-         Docs = parse_json(tostring(Properties["gen_ai.retrieval.documents"]))
-| mv-expand Doc = Docs
-| extend DocId = tostring(Doc.id), Score = todouble(Doc.score)
-| summarize Searches = dcount(Id), ReturnedDocs = count(), AvgTopK = avg(TopK),
-            LowScoreShare = round(1.0 * countif(Score < 0.5) / count(), 3),
-            DupInTurn = count() - dcount(strcat(OperationId, "|", DocId))
-```
+SQL: `queries/metrics/C3.sql`의 `retrieval_quality`, `search_result`.
 
-점수 임계값(위 예시는 0.5)은 검색 엔진의 점수 척도에 맞춰 바꾼다. BM25, 벡터 유사도, semantic reranker의 척도가 서로 다르다.
+저점수 기준(`config/thresholds.csv`의 `low_score`, 0.5)은 검색 엔진의 점수 척도에 맞춰 바꾼다. BM25, 벡터 유사도, semantic reranker의 척도가 서로 다르다.
 
 - **판정**: 검색당 결과 토큰이 크고, 저점수·중복 문서 비율이 0.5 이상이면(고점수 문서가 과반이 아니면) C3 후보로 올린다. 결과가 크더라도 대부분 고점수이고 응답에 인용되면 정상이다.
 - **낭비 추정**: (저점수 + 중복 문서 토큰) × 이후 남은 호출 수 × P\_eff.
@@ -771,7 +497,7 @@ Spans
 
 턴 비용은 호출 수에 비례하는 것보다 빠르게 늘어난다. 호출마다 그때까지 쌓인 컨텍스트 전체를 다시 보내기 때문이다. D 범주는 불필요한 호출이 어디서 생기는지를 찾는다.
 
-`gen_ai.response.finish_reasons` 값의 표기는 계측과 API에 따라 다를 수 있다. 아래 쿼리는 tool 호출 응답을 `tool_calls`로 가정하므로, 먼저 `Calls | summarize count() by Finish`로 실제 값을 확인한다.
+`gen_ai.response.finish_reasons` 값의 표기는 계측과 API에 따라 다를 수 있다. OTel 규약에서 이 속성은 문자열 배열(`["tool_calls"]`)이고 OpenAI 계열은 `tool_calls`를 쓴다. 아래 SQL은 이 값을 가정하므로, 먼저 `SELECT Finish, count(*) FROM calls GROUP BY 1`로 실제 값을 확인한다.
 
 ### D1. 루프·중복 Tool 호출
 
@@ -784,30 +510,13 @@ Spans
 
 **쿼리: 턴당 호출 수 분포와 꼬리 비용.** 에이전트별 턴당 LLM 호출 수의 p50, p95, max와, p95 이상 턴의 비용 비중을 구한다. 호출이 비정상적으로 많은 턴(D1)이 있는지 본다.
 
-```kusto
-let TurnStats = Calls | summarize N = max(CallIdx), TurnCost = sum(Cost) by Agent, OperationId;
-let Cut = TurnStats | summarize P50N = percentile(N, 50), P95N = percentile(N, 95), MaxN = max(N) by Agent;
-TurnStats
-| join kind=inner Cut on Agent
-| summarize P50N = any(P50N), P95N = any(P95N), MaxN = any(MaxN),
-            TailCostShare = round(sumif(TurnCost, N >= P95N) / sum(TurnCost), 3) by Agent
-| extend TailRatio = round(1.0 * P95N / P50N, 2)
-```
+SQL: `queries/metrics/D1.sql`의 `tail_turns`, `n_hist`.
 
 **쿼리: 중복 Tool 호출.** 같은 턴에서 같은 tool을 같은 인자로 다시 부른 호출을 tool별로 센다. 루프·중복 호출(D1)을 확정할 때 쓴다.
 
-```kusto
-Tools
-| join kind=inner (Content
-                   | where isnotempty(ToolCallArguments)
-                   | project SpanId, ArgHash = hash_sha256(ToolCallArguments)) on $left.Id == $right.SpanId
-| summarize Cnt = count() by OperationId, ToolName, ArgHash
-| summarize ToolCalls = sum(Cnt), DupCalls = sumif(Cnt - 1, Cnt > 1) by ToolName
-| extend DupRate = round(1.0 * DupCalls / ToolCalls, 3)
-| order by DupCalls desc
-```
+SQL: `queries/metrics/D1.sql`의 `dup_tool_calls`, `dup_tail_vs_rest`.
 
-content가 없으면 \[T\] 근사로, 한 턴에서 같은 tool을 3회 이상 부른 턴의 비율을 본다: `Tools | summarize Cnt = count() by OperationId, ToolName | summarize Turns = count(), RepeatTurns = countif(Cnt >= 3) by ToolName`.
+content가 없으면 \[T\] 근사로, 한 턴에서 같은 tool을 3회 이상 부른 턴의 비율을 본다. SQL은 `queries/metrics/D1.sql`의 `repeat_turns`다.
 
 - **판정**
   - 꼬리 턴 비용 비중이 0.15 이상이면, 호출 수 상위 5% 턴이 균등 분배 비중(5%)의 3배 넘는 비용을 차지하는 것이므로 꼬리 턴을 샘플로 연다(초기값). 에이전트 토큰 사용은 원래 꼬리가 길고 같은 작업도 실행마다 크게 달라서, 꼬리가 차지하는 비용을 기준으로 삼는다([Bai et al., 2026](https://arxiv.org/pdf/2604.22750)).
@@ -827,17 +536,7 @@ content가 없으면 \[T\] 근사로, 한 턴에서 같은 tool을 3회 이상 �
 
 **쿼리: 라운드당 Tool 수.** tool 호출로 끝난 LLM 호출 1회당 실행된 tool 수와, tool을 하나씩만 부르는 순차 연쇄 턴의 비율을 구한다. 순차 처리(D2)를 확인한다.
 
-```kusto
-let ToolN = Tools | summarize ToolN = count() by OperationId;
-Calls
-| where Finish contains "tool_calls"
-| summarize ToolRounds = count() by Agent, OperationId
-| join kind=inner ToolN on OperationId
-| summarize Turns = count(),
-            AvgToolsPerRound = round(avg(1.0 * ToolN / ToolRounds), 2),
-            SerialChainShare = round(1.0 * countif(ToolRounds >= 3 and ToolN == ToolRounds) / count(), 3)
-  by Agent
-```
+SQL: `queries/metrics/D2.sql`의 `round_tools`.
 
 - **판정**: 라운드당 tool 수가 1에 가깝고 순차 연쇄 턴이 있는데, \[C\]로 보니 연속 tool이 서로의 결과를 인자로 쓰지 않으면 D2로 판정한다. 의존 관계가 있으면 정상이다. 순차 연쇄 턴 비율의 수치 기준은 두지 않는다. 비율과 낭비 상한을 기록하고 \[C\] 확인 전까지 판정을 보류한다.
 - **낭비 추정**: 연쇄 길이 k인 턴마다 (k − 1) × 해당 라운드들의 평균 InTok × P\_eff.
@@ -852,22 +551,11 @@ Calls
 
 **쿼리: 짧은 출력 호출 비중.** 가시 출력이 50 토큰 미만이고 tool 호출이 아닌 호출의 건수와 비용 비중을 에이전트·모델별로 구한다. 규칙으로 대체할 수 있는 단계(D3)의 후보를 찾는다.
 
-```kusto
-Calls
-| extend Short = (OutTok - ReasonTok) < 50 and not(Finish contains "tool_calls")
-| summarize Calls = count(), ShortCalls = countif(Short),
-            ShortCostShare = round(sumif(Cost, Short) / sum(Cost), 3) by Agent, Model
-```
+SQL: `queries/metrics/D3.sql`의 `short_output`.
 
 **쿼리: 짧은 출력의 다양성.** 짧은 출력 호출의 `OutputMessages`가 몇 가지 값으로 나오는지 센다. 소수의 레이블로 수렴하는지 보고 D3를 판정한다.
 
-```kusto
-Calls
-| where (OutTok - ReasonTok) < 50 and not(Finish contains "tool_calls")
-| join kind=inner (Content | project SpanId, Out = OutputMessages) on $left.Id == $right.SpanId
-| summarize ShortCalls = count(), DistinctOutputs = dcount(hash_sha256(Out)) by Agent
-| extend OutputDiversity = round(1.0 * DistinctOutputs / ShortCalls, 3)
-```
+SQL: `queries/metrics/D3.sql`의 `output_diversity`.
 
 - **판정**: 짧은 출력 호출의 비용 비중이 의미 있고 출력 다양성이 낮으면(출력 종류가 몇 개의 레이블뿐이면) D3로 판정한다. 비용 비중과 다양성의 수치 기준은 두지 않는다. 두 값을 기록하고 \[S\]로 규칙 처리가 가능한 단계인지 확인하기 전까지 판정을 보류한다. 그 호출이 상위 모델이면 E1과 겹친다.
 - **낭비 추정**: 해당 호출의 비용 전체. 규칙으로 대체할 수 있다고 볼 때의 상한이다.
@@ -882,36 +570,9 @@ Calls
 
 **쿼리: 위임 시 Input 전달량.** 하위 에이전트의 첫 호출 InTok과 위임 직전 상위 에이전트 호출의 InTok을 짝지어 비교한다. 양쪽에서 S\_a를 빼고 전달 비율을 구해 상위 이력이 하위로 통째로 넘어가는지(D4) 확인한다.
 
-```kusto
-let S = datatable(Agent:string, STok:long) [ "<에이전트명>", 0 ];   // 측정법 1–3으로 구한 S_a
-let Roots = Spans | where Op == "invoke_agent"
-    | summarize arg_min(TimeGenerated, Id) by OperationId | project OperationId, RootSpanId = Id;
-let SubAgentSpans = Spans | where Op == "invoke_agent"
-    | join kind=inner Roots on OperationId
-    | where Id != RootSpanId
-    | project OperationId, SubSpanId = Id, SubAgent = tostring(Properties["gen_ai.agent.name"]);
-let SubFirst = Calls
-    | join kind=inner SubAgentSpans on $left.ParentId == $right.SubSpanId
-    | summarize arg_min(TimeGenerated, InTok) by OperationId, SubSpanId, SubAgent;
-let ParentCalls = Calls
-    | join kind=inner Roots on OperationId
-    | where ParentId == RootSpanId
-    | project OperationId, ParentTime = TimeGenerated, ParentIn = InTok, ParentAgent = Agent;
-SubFirst
-| join kind=inner ParentCalls on OperationId
-| where ParentTime < TimeGenerated
-| summarize arg_max(ParentTime, ParentIn, ParentAgent) by OperationId, SubSpanId, SubAgent, SubFirstIn = InTok
-| join kind=inner (S | project SubAgent = Agent, SSub = STok) on SubAgent
-| join kind=inner (S | project ParentAgent = Agent, SParent = STok) on ParentAgent
-| where ParentIn > SParent
-| extend PassRatio = todouble(SubFirstIn - SSub) / (ParentIn - SParent)
-| summarize Delegations = count(),
-            P50SubFirstIn = percentile(SubFirstIn, 50),
-            P50ParentIn = percentile(ParentIn, 50),
-            P50PassRatio = percentile(PassRatio, 50) by SubAgent
-```
+SQL: `queries/metrics/D4.sql`의 `delegation`.
 
-이 쿼리는 LLM 호출 span이 하위 `invoke_agent`의 직계 자식이라고 가정한다. 중간 span이 끼는 프레임워크라면 ParentId를 한 단계 더 올라가 매핑한다. 같은 매핑으로 하위 에이전트별 호출 수를 구해 B1, B4에도 쓴다.
+하위 에이전트의 LLM 호출 span은 그 `invoke_agent` span의 자손이라고 가정한다. 하위 `invoke_agent`의 부모는 상위 `invoke_agent`이거나, 에이전트를 tool로 부르는 구조에서는 위임 `execute_tool` span이다. `queries/views.sql`의 `call_owner`와 `sub_agents.ParentRunSpanId`가 가장 가까운 조상 `invoke_agent`를 찾으므로 어느 쪽이든 같은 결과가 나온다. 같은 귀속으로 하위 에이전트별 호출 수를 구해 B1, B4에도 쓴다.
 
 - **판정**: 전달 비율 p50이 0.8 이상이면 상위 가변 컨텍스트 대부분이 하위로 넘어가는 것이다(초기값). 비율 1이 "상위 가변 컨텍스트 전체 전달"을 뜻하므로 기준의 의미가 분명하다. 상위 에이전트의 S\_a를 모르면 판정을 보류한다. \[C\]로 하위 에이전트 역할에 필요한 부분인지 확인해 D4로 판정한다. 하위 응답 반입이 크면 상위 쪽에서 C2와 같은 재전송 문제가 생긴다.
 - **낭비 추정**: Σ(위임) (전달 토큰 − 필요 토큰) × 하위 에이전트 호출 수 × P\_eff.
@@ -928,23 +589,9 @@ Output 토큰은 Input보다 단가가 몇 배 높고, Reasoning 토큰은 보�
 
 **쿼리: 호출 유형별·모델별 비용.** LLM 호출을 계획, tool 처리, 짧은 출력, 최종 응답, 기타로 나누고 유형 × 모델별 비용과 출력 크기를 구한다. 단순 단계에 상위 모델을 쓰는지(E1) 본다.
 
-```kusto
-let LastIdx = Calls | summarize LastIdx = max(CallIdx) by OperationId;
-Calls
-| join kind=inner LastIdx on OperationId
-| extend CallType = case(
-      Finish contains "tool_calls" and CallIdx == 1, "1. 계획·첫 tool 선택",
-      Finish contains "tool_calls",                  "2. tool 결과 처리·다음 tool 선택",
-      (OutTok - ReasonTok) < 50,                     "3. 짧은 출력",
-      CallIdx == LastIdx,                            "4. 최종 응답",
-                                                     "5. 기타")
-| summarize Calls = count(), Cost = round(sum(Cost), 2),
-            P50Visible = percentile(OutTok - ReasonTok, 50), P50Reason = percentile(ReasonTok, 50)
-  by Agent, CallType, Model
-| order by Agent asc, CallType asc, Cost desc
-```
+SQL: `queries/metrics/E1.sql`의 `type_model_cost`, `savings`, `savings_by_type`.
 
-이 CallType 분류는 E2–E4에서도 같은 방식으로 붙여 쓴다.
+이 호출 유형 분류(`queries/views.sql`의 `call_types`)는 E2–E4에서도 같이 쓴다.
 
 - **판정**: 잠재 절감 비중 = Σ(유형 1–3 상위 모델 호출의 Cost − 소형 모델 단가로 다시 계산한 Cost) ÷ 전체 비용. 이 값이 0.1 이상이면 E1 후보로 기록한다(초기값). 품질 평가를 돌릴 만한 최소 절감폭이라는 운영 판단이며, 소형 모델로 품질이 유지되는지는 별도 평가 대상이다.
 - **낭비 추정 (상한)**: 잠재 절감 비중의 분자, 즉 Σ(후보 호출) \[Cost − 소형 모델 단가로 다시 계산한 Cost\].
@@ -960,15 +607,7 @@ Calls
 
 **쿼리: Reasoning 비중.** 에이전트·모델·reasoning 수준별로 Output 중 reasoning 토큰의 비중과 분포를 구한다. Reasoning 과다(E2)를 확인한다.
 
-```kusto
-Calls
-| extend Level = tostring(Properties["gen_ai.request.reasoning.level"])
-| summarize Calls = count(),
-            ReasonShare = round(1.0 * sum(ReasonTok) / sum(OutTok), 3),
-            P50Reason = percentile(ReasonTok, 50), P95Reason = percentile(ReasonTok, 95),
-            P50Visible = percentile(OutTok - ReasonTok, 50)
-  by Agent, Model, Level
-```
+SQL: `queries/metrics/E2.sql`의 `reasoning`, `reasoning_by_type`.
 
 - **판정**: 수치 기준은 두지 않는다. reasoning 토큰은 문제 복잡도에 따라 수백에서 수만까지 달라져서 적정 수준이 작업에 종속되기 때문이다([OpenAI](https://developers.openai.com/api/docs/guides/reasoning)). 대신 단순 단계(유형 1–3)가 최종 응답 단계(유형 4)와 같은 reasoning 수준으로 실행되고 ReasonTok 분포도 비슷하면 E2 후보로 기록한다. Level이 비어 있으면 \[S\]로 설정값을 확인한다.
 - **낭비 추정**: Σ(후보 호출) (ReasonTok − 같은 유형 저수준 호출의 ReasonTok p50) × P\_out. 저수준 호출이 없으면 소수 샘플을 낮은 수준으로 다시 실행해 비교한다.
@@ -984,23 +623,11 @@ Calls
 
 **쿼리: 최종 응답 길이.** 턴 마지막 호출 중 tool 호출이 아닌 응답의 가시 출력 분포와 max\_tokens 미설정 비율을 구한다. 장황한 응답(E3)을 확인한다.
 
-```kusto
-let LastIdx = Calls | summarize LastIdx = max(CallIdx) by OperationId;
-Calls
-| join kind=inner LastIdx on OperationId
-| where CallIdx == LastIdx and not(Finish contains "tool_calls")
-| extend Visible = OutTok - ReasonTok,
-         MaxTok  = toint(Properties["gen_ai.request.max_tokens"])
-| summarize Finals = count(), P50Visible = percentile(Visible, 50), P95Visible = percentile(Visible, 95),
-            NoMaxTokens = round(1.0 * countif(isnull(MaxTok)) / count(), 3) by Agent
-```
+SQL: `queries/metrics/E3.sql`의 `final_response`.
 
 **쿼리: Output 비용 비중.** 에이전트별 전체 비용 중 Output 토큰 비용의 비중을 구한다. E3의 영향 크기를 가늠한다.
 
-```kusto
-Calls
-| summarize OutCostShare = round(sum(OutTok * POut / 1e6) / sum(Cost), 3) by Agent
-```
+SQL: `queries/metrics/E3.sql`의 `output_cost_share`.
 
 - **판정**: 범용 수치 기준은 두지 않는다. 적정 응답 길이는 서비스 용도(짧은 Q&A, 요약, 보고서 생성 등)에 따라 수십에서 수천 토큰까지 갈리기 때문이다. 고객이 정한 목표 길이가 있으면, P95가 목표를 넘고 \[C\] 샘플에서 반복이나 불필요한 구간이 확인될 때 E3로 판정한다. 목표 길이가 없으면 판정을 보류하고 고객에게 확인할 항목으로 남긴다.
 - **낭비 추정**: Σ(최종 응답) (가시 출력 − 목표 길이) × P\_out. 이력이 유지되면 이후 턴의 재전송분 × P\_eff를 더한다.
@@ -1016,19 +643,7 @@ Calls
 
 **쿼리: 출력 잘림.** finish\_reasons의 length나 status incomplete로 끝난 호출의 비율, reasoning 비중, 후속 호출 수, 비용을 구한다. 출력 잘림(E4)을 확인한다.
 
-```kusto
-let LastIdx = Calls | summarize LastIdx = max(CallIdx) by OperationId;
-Calls
-| join kind=inner LastIdx on OperationId
-| extend Truncated = Finish contains "length"
-                     or tostring(Properties["gen_ai.response.status"]) == "incomplete"
-| summarize Calls = count(), TruncCalls = countif(Truncated),
-            TruncRate = round(1.0 * countif(Truncated) / count(), 4),
-            TruncReasonShare = round(1.0 * sumif(ReasonTok, Truncated) / sumif(OutTok, Truncated), 3),
-            FollowUpAfterTrunc = countif(Truncated and CallIdx < LastIdx),
-            TruncCost = round(sumif(Cost, Truncated), 2)
-  by Agent, Model
-```
+SQL: `queries/metrics/E4.sql`의 `truncation`.
 
 - **판정**: 잘림이 반복되고(2건 이상) 잘린 뒤 후속 호출이 이어지면 E4로 판정한다. TruncReasonShare가 0.8 이상이면 reasoning 소진형이다.
 - **낭비 추정**: Σ 잘린 호출 Cost + 잘림 때문에 생긴 후속 호출 Cost.
@@ -1047,26 +662,11 @@ Calls
 
 **쿼리: Tool별 실패율.** `execute_tool` span의 성공 여부로 tool별 실패 건수와 실패율을 구하고 오류 유형 예시를 붙인다. 실패가 잦은 tool(F1)을 찾는다.
 
-```kusto
-Tools
-| summarize Calls = count(), Failed = countif(Success == false),
-            FailRate = round(1.0 * countif(Success == false) / count(), 3),
-            SampleErr = take_anyif(ToolErr, isnotempty(ToolErr))
-  by ToolName
-| order by Failed desc
-```
+SQL: `queries/metrics/F1.sql`의 `tool_failures`, `error_types`.
 
 **쿼리: 실패 턴과 정상 턴 비교.** tool 실패가 있는 턴과 없는 턴의 비용 중앙값, 호출 수 중앙값을 나란히 구한다. 실패가 비용을 얼마나 키우는지(F1) 본다.
 
-```kusto
-let FailTurns = Tools | summarize HasFail = countif(Success == false) > 0 by OperationId;
-Calls
-| summarize TurnCost = sum(Cost), N = max(CallIdx) by Agent, OperationId
-| join kind=leftouter FailTurns on OperationId
-| extend HasFail = coalesce(HasFail, false)
-| summarize Turns = count(), P50TurnCost = percentile(TurnCost, 50), P50Calls = percentile(N, 50),
-            TotalCost = sum(TurnCost) by Agent, HasFail
-```
+SQL: `queries/metrics/F1.sql`의 `fail_vs_ok_turns`.
 
 - **판정**
   - 특정 tool의 실패가 반복되고(2건 이상), 실패 턴의 비용 중앙값이 정상 턴보다 크면 F1로 판정한다. 실패율의 수치 기준은 두지 않고 실패 턴과 정상 턴의 비용을 비교한다.
@@ -1084,19 +684,9 @@ Calls
 
 **쿼리: LLM 호출 실패와 재요청.** 실패로 끝난 LLM 호출과, 같은 턴에서 직전과 거의 같은 Input으로 다시 보낸 호출을 세고 비용을 구한다. F2를 확인한다.
 
-```kusto
-Calls
-| extend PrevIn     = iff(CallIdx > 1, prev(InTok), long(null)),
-         PrevFinish = iff(CallIdx > 1, prev(Finish), "")
-| extend Failed = Success == false or Finish contains "content_filter" or Finish contains "error",
-         Resend = isnotnull(PrevIn) and abs(InTok - PrevIn) <= 50 and not(PrevFinish contains "tool_calls")
-| summarize Calls = count(), FailedCalls = countif(Failed),
-            FailedCost = round(sumif(Cost, Failed), 2),
-            Resends = countif(Resend), ResendCost = round(sumif(Cost, Resend), 2)
-  by Agent
-```
+SQL: `queries/metrics/F2.sql`의 `llm_failures`, `error_breakdown`.
 
-실패 호출은 `ResultCode`와 `tostring(Properties["error.type"])`로 다시 나눠 본다.
+실패 호출은 `ResultCode`와 `error.type`으로 다시 나눠 본다(`error_breakdown`).
 
 - **판정**
   - 실패 호출이나 재요청이 반복되면(2건 이상) F2 후보로 올린다. 실패 비율의 수치 기준은 두지 않는다. 비용은 낭비 추정으로 보인다.
@@ -1114,32 +704,13 @@ Calls
 
 **쿼리: 빠른 재입력 비율.** 같은 대화에서 직전 턴이 끝나고 60초 안에 시작된 턴의 비율을 구한다. 재질문(F3)을 텔레메트리만으로 근사할 때 쓴다.
 
-```kusto
-Spans
-| where Op == "invoke_agent"
-| summarize arg_min(TimeGenerated, DurationMs, Properties) by OperationId
-| extend Conv = tostring(Properties["gen_ai.conversation.id"]),
-         TurnEnd = datetime_add('millisecond', toint(DurationMs), TimeGenerated)
-| where isnotempty(Conv)
-| sort by Conv asc, TimeGenerated asc
-| extend GapSec = iff(prev(Conv) == Conv, datetime_diff('second', TimeGenerated, prev(TurnEnd)), long(null))
-| summarize Turns = count(),
-            QuickRetryRate = round(1.0 * countif(GapSec between (0 .. 60)) / count(), 3)
-```
+SQL: `queries/metrics/F3.sql`의 `quick_reinput`.
 
 **쿼리: 대화별 사용자 메시지 추출.** 턴 첫 호출의 `InputMessages`에서 마지막 user 메시지를 꺼내 대화·시간순으로 정렬한다. 연속 메시지 유사도 계산(F3)의 입력으로 쓴다.
 
-```kusto
-Calls
-| where CallIdx == 1 and isnotempty(Conv)
-| join kind=inner (Content | project SpanId, InputMessages) on $left.Id == $right.SpanId
-| mv-apply M = parse_json(InputMessages) on (
-      where tostring(M.role) == "user" | summarize Users = make_list(M))
-| project Conv, TimeGenerated, UserText = tostring(Users[-1].parts[0].content)
-| order by Conv asc, TimeGenerated asc
-```
+SQL: `queries/metrics/F3.sql`의 `quick_pairs`.
 
-두 번째 쿼리로 대화별 사용자 메시지를 뽑은 뒤, 연속 메시지의 임베딩 유사도는 Python 등으로 계산한다. 메시지 구조(`parts[0].content`)는 계측에 따라 다를 수 있으니 실제 JSON을 먼저 확인한다.
+`quick_pairs`로 SpanId를 특정한 뒤 `queries/export/90-content-by-span.kql`로 원문을 받고, 연속 메시지의 임베딩 유사도는 Python 등으로 계산한다. 메시지 구조(`parts[0].content`)는 계측에 따라 다를 수 있으니 실제 JSON을 먼저 확인한다.
 
 - **판정**: \[C\] 재질문 비율이 높고, 재질문 직전 턴의 응답이 샘플에서 불완전하거나 엉뚱하면 F3로 판정한다. 빠른 재입력 비율의 수치 기준은 두지 않는다. \[T\] 근사만 있으면 비율과 직전 턴 비용을 기록하고 판정을 보류한다. 빠른 재입력이 꼭 재질문은 아니기 때문이다.
 - **낭비 추정**: Σ(재질문 직전 턴) 턴 비용.
@@ -1152,16 +723,7 @@ Calls
 
 **쿼리: 실패 턴 비용.** 루트 `invoke_agent`의 성공 여부로 실패 턴 비율, 실패 턴 비용 비중, 실패·정상 턴의 평균 호출 수를 구한다. F4를 확인한다.
 
-```kusto
-Calls
-| summarize TurnCost = sum(Cost), N = max(CallIdx), TurnOk = any(TurnOk) by Agent, OperationId
-| summarize Turns = count(),
-            FailTurnRate  = round(1.0 * countif(TurnOk == false) / count(), 3),
-            FailCostShare = round(sumif(TurnCost, TurnOk == false) / sum(TurnCost), 3),
-            AvgCallsFail  = round(avgif(N, TurnOk == false), 1),
-            AvgCallsOk    = round(avgif(N, TurnOk == true), 1)
-  by Agent
-```
+SQL: `queries/metrics/F4.sql`의 `failed_turns`.
 
 - **판정**
   - 늦은 실패 계수(FailCostShare ÷ FailTurnRate)가 1.5 이상이면, 실패 턴이 평균 턴보다 1.5배 넘게 비싼 것이므로 많이 쓰고 나서 실패하는 "늦은 실패"로 판정한다(초기값). 1을 넘으면 실패 턴이 평균보다 비싸다는 뜻이고, 0.5는 잡음 여유다. D1, F1과 연결해 본다.

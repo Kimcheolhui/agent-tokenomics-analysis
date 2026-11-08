@@ -178,5 +178,5 @@ python3 <skill>/scripts/validate_report.py out/report.json
 ## 알려진 한계
 
 - 추출 KQL은 실제 Log Analytics에서 실행해 검증하지 않았다. 고객 환경에서 `AppGenAIContent` 컬럼명, `union`의 `Target` 컬럼, `finish_reasons`의 tool 호출 값(`tool_calls` 가정)을 먼저 확인한다.
-- gen_ai 속성은 OpenTelemetry에서 아직 Development 단계라 이름이 바뀔 수 있다(예: `cache_creation` → `cache_write`).
+- gen_ai 속성은 OpenTelemetry에서 아직 Development 단계라 이름이 바뀔 수 있다. `cache_creation`은 이미 `cache_write`로 바뀌었다. 공식 문서와 대조한 결과는 `references/telemetry-reference.md`에 있다.
 - 토큰 수를 문자 수로 근사하는 곳이 있다(`chars_per_token`). 측정법 1·2로 확정하기 전의 근사다.

@@ -15,7 +15,7 @@
 5. 섹션 3에서 해당 항목의 지표를 산출한다.
 6. 판정 기준과 감별로 원인을 확정하고, 낭비 추정식으로 크기를 매긴다.
 
-데이터를 매번 Log Analytics에서 쿼리하지 않고 CSV로 한 번 내려 로컬에서 산출하는 방법은 `references/data-contract.md`에 있다. 이 가이드의 KQL은 같은 지표를 정의하는 기준이고, 로컬 산출은 `queries/metrics/`의 SQL이 같은 정의를 따른다.
+데이터를 매번 Log Analytics에서 쿼리하지 않고 CSV로 한 번 내려 로컬에서 산출하는 방법은 `references/data-contract.md`에 있다. 지표 산출은 `queries/metrics/`의 SQL이 기준이다. 가이드에는 SQL을 옮겨 적지 않고 쿼리 이름과 SQL 위치만 적는다. 로그를 내려받는 KQL은 `queries/export/`에만 있다.
 
 ### 분석 단위
 
@@ -30,7 +30,7 @@
 
 ### 텔레메트리 위치
 
-모든 쿼리는 Log Analytics workspace 스키마로 작성한다. content 테이블인 `AppGenAIContent`가 workspace 테이블이기 때문이다.
+추출 쿼리는 Log Analytics workspace 스키마로 작성한다. content 테이블인 `AppGenAIContent`가 workspace 테이블이기 때문이다.
 
 - `AppDependencies`: GenAI span 대부분. 속성은 `Properties`, trace는 `OperationId`, span은 `Id`, 부모는 `ParentId`, 성공 여부는 `Success`.
 - `AppRequests`: server kind로 기록된 span(일부 `invoke_agent`). `AppDependencies`와 union해서 조회한다.
@@ -62,14 +62,7 @@ gen\_ai 속성은 아직 Development 단계라 이름이 바뀐다. 예를 들�
 
 사전 점검 P1~P4, P9에 쓰는 아래 쿼리로 LLM 호출(chat) span에 실제로 기록되는 **속성 키**를 확인한다. 결과에는 키별로 그 키가 들어 있는 span 수가 나온다.
 
-```kusto
-AppDependencies
-| where TimeGenerated > ago(1d)
-| where tostring(Properties["gen_ai.operation.name"]) == "chat"
-| take 500
-| mv-expand Key = bag_keys(Properties)
-| summarize Spans = count() by tostring(Key)
-```
+추출 쿼리: `queries/export/00-precheck-keys.kql`.
 
 `cache_read`나 `reasoning` 키가 없으면 그 키를 쓰는 3장 지표는 산출할 수 없다(cache\_read: A의 캐시율·달성률과 A1·A5·A6 히트율, reasoning: E2 Reasoning 비중과 E1·D3의 가시 출력). 이 경우 진단 결과에 "계측 부재"로 기록한다.
 
@@ -83,24 +76,16 @@ AppDependencies
 | P2 | 속성 키 `reasoning` 수집 | 같은 쿼리, `WithReasoning` | E2 Reasoning 비중, E1·D3의 가시 출력 |
 | P3 | 속성 키 `gen_ai.conversation.id` 수집 | 같은 쿼리, `WithConvId` | C1 전체, F3 빠른 재입력 비율, 대화 기준 지표 |
 | P4 | `gen_ai.agent.name` 이 chat span에 기록되는가 | `WithAgentOwner`와 `Agent` 컬럼 비교 | B1·B4·D4의 에이전트 귀속. 기록되지 않으면 호출이 루트 에이전트로 집계된다 |
-| P5 | `finish_reasons` 의 tool 호출 값 | `Calls \| summarize count() by Finish` | D1·D2·D3·E1·E4·F2의 호출 유형 분류. 쿼리는 `tool_calls`를 가정한다 |
-| P6 | 턴 1개 = trace 1개 | 아래 "턴·trace 점검" 쿼리 | 턴 단위 지표 전체 (CallIdx, 턴 비용, 꼬리 비중) |
+| P5 | `finish_reasons` 의 tool 호출 값 | `SELECT Finish, count(*) FROM calls GROUP BY 1` | D1·D2·D3·E1·E4·F2의 호출 유형 분류. SQL은 `tool_calls`를 가정한다 |
+| P6 | 턴 1개 = trace 1개 | 아래 "턴·trace 점검"의 `turn_trace_check` | 턴 단위 지표 전체 (CallIdx, 턴 비용, 꼬리 비중) |
 | P7 | `AppGenAIContent` 접근과 content recording | 테이블이 비어 있지 않은가, Privileged Monitoring Data Reader 역할 | [C] 지표 전체: A1·A2 변형 수, B1~B3 정의 크기, C2 결과 크기, D1 중복, D3 다양성, F3 메시지 |
 | P8 | 응답 모델명이 `ModelParams`와 일치 | 로컬 `unpriced_calls`, 또는 `Calls \| where isnull(PIn)` | 일치하지 않는 호출은 `Cost`가 비어 비용 합계에서 경고 없이 빠진다 |
 | P9 | `gen_ai.request.max_tokens` 기록 | `WithMaxTokens` | E3 max_tokens 미설정 비율. 미기록과 미설정을 구분할 수 없다 |
 
 **쿼리: 턴·trace 점검.** invoke_agent span이 trace당 몇 개인지, 한 trace가 여러 대화를 묶는지 센다. 대화 전체를 trace 하나로 묶는 앱은 `TracesWithMultiConv`가 크게 나오고, 이 경우 턴 단위 지표가 틀어진다. 반대로 한 턴을 여러 trace로 나누는 경우는 텔레메트리로 판별할 수 없으므로 \[S\]로 앱 구조를 확인한다.
 
-```kusto
-union AppDependencies, AppRequests
-| where TimeGenerated > ago(1d)
-| where tostring(Properties["gen_ai.operation.name"]) == "invoke_agent"
-| summarize InvokeSpans = count(), Convs = dcount(tostring(Properties["gen_ai.conversation.id"])) by OperationId
-| summarize Traces = count(), P50Spans = percentile(InvokeSpans, 50), P99Spans = percentile(InvokeSpans, 99),
-            TracesWithMultiConv = countif(Convs > 1)
-```
+SQL: `queries/views.sql`의 `turn_trace_check` (추출한 `agent_spans`로 계산한다).
 
-이 쿼리는 실제 Log Analytics에서 실행해 확인하지 않았다.
 
 점검에서 `cache_read`나 `reasoning` 키가 없으면 해당 지표는 "계측 부재"로 기록한다. P6가 실패하면 턴 단위 지표는 신뢰할 수 없으므로 앱 구조를 확인하고 진단 범위를 조정한다.
 
@@ -120,57 +105,11 @@ union AppDependencies, AppRequests
 
 ### 공통 쿼리 정의
 
-섹션 3의 모든 쿼리는 아래 정의를 앞에 붙여 실행한다. `ModelParams`에는 고객이 쓰는 모델의 Azure 단가(USD / 1M 토큰)와 캐시 파라미터를 채운다. 응답 모델명에는 버전 접미사가 붙을 수 있으니 실제 값에 맞춘다.
+섹션 3의 모든 SQL은 아래 정의(`queries/views.sql`)를 기반으로 한다. `ModelParams`(`config/model-params.csv`)에는 고객이 쓰는 모델의 Azure 단가(USD / 1M 토큰)와 캐시 파라미터를 채운다. 응답 모델명에는 버전 접미사가 붙을 수 있으니 실제 값에 맞춘다.
 
-**쿼리: 공통 정의.** 분석 기간(T0), 모델별 단가·캐시 파라미터(ModelParams), GenAI span(Spans), 턴(Turns), LLM 호출(Calls), Tool 호출(Tools), 원문(Content)을 정의한다. 섹션 3의 모든 쿼리가 같은 분석 단위와 비용 계산식을 쓰게 하려는 용도다. Calls에는 호출별 비용(Cost), 턴 안 호출 순번(CallIdx), 모델 캐시 파라미터가 붙는다. Cacheable은 캐시 가능 토큰을 계산하는 함수다.
+**공통 정의.** 모델별 단가·캐시 파라미터(ModelParams), 턴(Turns), LLM 호출(Calls), Tool 호출(Tools), 원문(Content)을 정의한다. 섹션 3의 모든 지표가 같은 분석 단위와 비용 계산식을 쓰게 하려는 용도다. Calls에는 호출별 비용(Cost), 턴 안 호출 순번(CallIdx), 모델 캐시 파라미터가 붙는다. `cacheable()` 매크로는 캐시 가능 토큰을 계산한다.
 
-```kusto
-let T0 = ago(14d);
-// 모델별 단가(USD / 1M 토큰)와 캐시 파라미터. 값은 "모델별 캐시 파라미터" 표를 따른다.
-let ModelParams = datatable(Model:string, PIn:real, PCache:real, PWrite:real, POut:real,
-                            MinTok:long, Round128:bool, WindowMin:real, RpmLimit:long)
-[
-    "<응답 모델명>", 0.0, 0.0, 0.0, 0.0, 1024, true, 5.0, 15
-];
-let Cacheable = (x:long, minTok:long, round128:bool) {
-    iff(x < minTok, long(0), iff(round128, (x / 128) * 128, x))
-};
-let Spans = union AppDependencies, AppRequests
-    | where TimeGenerated > T0
-    | extend Op = tostring(Properties["gen_ai.operation.name"]);
-let Turns = Spans
-    | where Op == "invoke_agent"
-    | summarize arg_min(TimeGenerated, *) by OperationId
-    | project OperationId, TurnStart = TimeGenerated, TurnOk = Success,
-              RootAgent = tostring(Properties["gen_ai.agent.name"]),
-              TurnConv  = tostring(Properties["gen_ai.conversation.id"]);
-let Calls = Spans
-    | where Op in ("chat", "text_completion", "generate_content")
-    | extend
-        Model     = tostring(Properties["gen_ai.response.model"]),
-        InTok     = tolong(Properties["gen_ai.usage.input_tokens"]),
-        CacheTok  = coalesce(tolong(Properties["gen_ai.usage.cache_read.input_tokens"]), 0),
-        WriteTok  = coalesce(tolong(Properties["gen_ai.usage.cache_write.input_tokens"]),
-                             tolong(Properties["gen_ai.usage.cache_creation.input_tokens"]), 0),
-        OutTok    = tolong(Properties["gen_ai.usage.output_tokens"]),
-        ReasonTok = coalesce(tolong(Properties["gen_ai.usage.reasoning.output_tokens"]), 0),
-        Finish    = tostring(Properties["gen_ai.response.finish_reasons"]),
-        Endpoint  = coalesce(tostring(Properties["server.address"]), Target),
-        CallAgent = tostring(Properties["gen_ai.agent.name"]),
-        CallConv  = tostring(Properties["gen_ai.conversation.id"])
-    | join kind=leftouter Turns on OperationId
-    | join kind=leftouter ModelParams on Model
-    | extend Agent = coalesce(CallAgent, RootAgent), Conv = coalesce(CallConv, TurnConv)
-    | extend Cost = ((InTok - CacheTok - WriteTok) * PIn + CacheTok * PCache
-                     + WriteTok * PWrite + OutTok * POut) / 1e6
-    | sort by OperationId asc, TimeGenerated asc
-    | extend CallIdx = row_number(1, prev(OperationId) != OperationId);
-let Tools = Spans
-    | where Op == "execute_tool"
-    | extend ToolName = tostring(Properties["gen_ai.tool.name"]),
-             ToolErr  = tostring(Properties["error.type"]);
-let Content = AppGenAIContent | where TimeGenerated > T0;
-```
+공통 정의는 추출 쿼리 `queries/export/10-calls.kql`(Calls)과 로컬 뷰 `queries/views.sql`(Turns, CallIdx, Cost, Tools, Content, ModelParams)에 있다. 이 가이드의 지표는 모두 그 뷰 위에서 `queries/metrics/*.sql`로 계산한다.
 
 ### 표기
 

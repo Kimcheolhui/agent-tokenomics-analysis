@@ -12,17 +12,7 @@
 
 **쿼리: 에이전트별 캐시율·캐시 달성률.** 실제 캐시 히트 토큰을 이론 상한과 비교해, A 범주를 점검할지 판단한다. 첫 줄의 S 표에는 3-B에서 측정한 에이전트별 고정 Input 토큰을 넣는다.
 
-```kusto
-let S = datatable(Agent:string, STok:long) [ "<에이전트명>", 0 ];   // 3-B 측정값
-Calls
-| extend PrevIn = iff(CallIdx > 1, prev(InTok), long(null))
-| join kind=leftouter S on Agent
-| extend Theo = min_of(iff(CallIdx == 1, Cacheable(STok, MinTok, Round128),
-                                         Cacheable(PrevIn, MinTok, Round128)), InTok)
-| summarize Input = sum(InTok), Actual = sum(CacheTok), Theoretical = sum(Theo) by Agent
-| extend CacheRate   = round(1.0 * Actual / Input, 3),
-         Achievement = round(1.0 * Actual / Theoretical, 3)
-```
+SQL: `queries/metrics/A-common.sql`의 `agent_cache`, `overall`, `by_callidx`.
 
 - 달성률이 0.7 미만이면 A1–A6을 점검한다.
 - 달성률이 1을 넘을 수 있다. 같은 대화의 이전 턴 이력까지 히트한 경우이며 정상이다. 턴 첫 호출의 이론치를 고정부로만 잡았기 때문이다.
@@ -41,33 +31,11 @@ Calls
 
 **쿼리: 보존 시간 내 첫 호출 미스율.** 만료(A5)와 쏠림(A6)이 생기지 않는 조건의 턴 첫 호출만 골라 캐시 미스 비율을 구한다. 이 조건에서는 캐시가 살아 있어야 하므로, 미스가 많으면 prefix 자체가 바뀐다고 볼 수 있다. A1 판정의 1차 신호로 쓴다.
 
-```kusto
-let S = datatable(Agent:string, STok:long) [ "<에이전트명>", 0 ];   // 3-B 측정값
-let Rpm = Calls | summarize MinuteCalls = count() by Agent, Minute = bin(TimeGenerated, 1m);
-Calls
-| where CallIdx == 1
-| sort by Agent asc, TimeGenerated asc
-| extend GapMin = iff(prev(Agent) == Agent,
-                      datetime_diff('second', TimeGenerated, prev(TimeGenerated)) / 60.0, real(null)),
-         Minute = bin(TimeGenerated, 1m)
-| join kind=inner S on Agent
-| join kind=leftouter Rpm on Agent, Minute
-| where STok >= MinTok and GapMin < WindowMin and MinuteCalls <= RpmLimit
-| summarize WarmFirstCalls = count(), Miss = countif(CacheTok == 0) by Agent
-| extend WarmMissRate = round(1.0 * Miss / WarmFirstCalls, 3)
-```
+SQL: `queries/metrics/A1.sql`의 `warm_first_miss`, `inturn_misses`.
 
 **쿼리: System prompt 변형 수.** 같은 에이전트의 `SystemInstructions`가 몇 가지로 기록됐는지 센다. 전체 변형(Variants)과 앞 4,000자 변형(HeadVariants)을 함께 보고, 동적 값이 앞부분에 있는지 확인한다.
 
-```kusto
-Content
-| where isnotempty(SystemInstructions)
-| summarize Records = count(),
-            Variants = dcount(hash_sha256(SystemInstructions)),
-            HeadVariants = dcount(hash_sha256(substring(SystemInstructions, 0, 4000)))
-  by AgentName
-| extend VariantRatio = round(1.0 * Variants / Records, 3)
-```
+SQL: `queries/metrics/A1.sql`의 `sys_variants`.
 
 - **판정**
   - 보존 시간 내 첫 호출 미스율(WarmMissRate)이 0.2 이상이고 VariantRatio가 0.1 이상이면 A1로 판정한다. 변형 2건을 꺼내 첫 차이 위치를 확인하면 원인 변수를 특정할 수 있다.
@@ -87,15 +55,7 @@ Content
 
 **쿼리: Tool 정의 변형 수.** `ToolDefinitions` 원문의 변형 수와 tool 이름 집합의 변형 수를 비교한다. 순서·설명 변동(A2)과 tool 목록 자체의 변동을 구분하려는 용도다.
 
-```kusto
-Content
-| where isnotempty(ToolDefinitions)
-| extend Names = tostring(array_sort_asc(extract_all(@'"name"\s*:\s*"([^"]+)"', ToolDefinitions)))
-| summarize Records = count(),
-            RawVariants = dcount(hash_sha256(ToolDefinitions)),
-            NameSetVariants = dcount(hash_sha256(Names))
-  by AgentName
-```
+SQL: `queries/metrics/A2.sql`의 `tooldef_variants`, `variant_share`.
 
 - **판정**
   - RawVariants가 NameSetVariants보다 크면, 같은 tool 집합인데 순서나 설명이 바뀐 것이다. A2로 판정한다.
@@ -113,20 +73,7 @@ Content
 
 **쿼리: 이력 축소 이벤트와 전후 캐시율.** 같은 대화에서 Input이 직전보다 줄어든 호출을 찾고, 그 직후 캐시율을 평상시와 비교한다. 이력 편집이 캐시를 깨는지(A3) 확인한다.
 
-```kusto
-Calls
-| where isnotempty(Conv)
-| sort by Conv asc, TimeGenerated asc
-| extend PrevIn = iff(prev(Conv) == Conv, prev(InTok), long(null)),
-         Compacted = tobool(Properties["gen_ai.conversation.compacted"])
-| extend Shrink = PrevIn > InTok
-| summarize Calls = count(),
-            ShrinkEvents = countif(Shrink),
-            CompactedCalls = countif(Compacted),
-            HitAfterShrink = round(avgif(1.0 * CacheTok / InTok, Shrink), 3),
-            HitNormal = round(avgif(1.0 * CacheTok / InTok, not(Shrink) and CallIdx > 1), 3)
-  by Agent
-```
+SQL: `queries/metrics/A3.sql`의 `shrink`, `conv_call_profile`.
 
 - **판정**
   - 축소 이벤트가 있고 HitAfterShrink가 HitNormal보다 낮으면(단측 검정) A3 후보로 올린다. \[C\]로 편집 지점을 확인해 A3로 판정한다.
@@ -142,15 +89,7 @@ Calls
 
 **쿼리: 캐시 불가 호출 비중.** Input이 모델의 MinTok보다 짧아 캐시 대상이 될 수 없는 호출의 건수와 비용 비중을 구한다. A4의 영향 크기를 가늠한다.
 
-```kusto
-Calls
-| extend Small = InTok < MinTok
-| summarize Calls = count(), Cost = sum(Cost),
-            SmallCalls = countif(Small), SmallCost = sumif(Cost, Small)
-  by Agent
-| extend SmallCallShare = round(1.0 * SmallCalls / Calls, 3),
-         SmallCostShare = round(SmallCost / Cost, 3)
-```
+SQL: `queries/metrics/A4.sql`의 `small_calls`.
 
 - **판정**
   - S\_a < MinTok이고 턴 첫 호출의 CacheTok이 항상 0이면 A4로 판정한다. A1과는 S\_a 크기로 구분한다.
@@ -167,21 +106,7 @@ Calls
 
 **쿼리: 요청 간격별 첫 호출 히트율.** 같은 에이전트의 연속된 턴 첫 호출 사이 간격을 모델 보존 시간(WindowMin)의 배수 구간으로 나눠 히트율을 비교한다. 보존 시간을 넘는 구간에서 히트율이 크게 낮아지는지로 캐시 만료(A5)를 확인한다.
 
-```kusto
-Calls
-| where CallIdx == 1
-| sort by Agent asc, TimeGenerated asc
-| extend GapMin = iff(prev(Agent) == Agent,
-                      datetime_diff('second', TimeGenerated, prev(TimeGenerated)) / 60.0, real(null))
-| where isnotnull(GapMin)
-| extend Bucket = case(GapMin < WindowMin,     "a. 보존 시간 안",
-                       GapMin < 2 * WindowMin, "b. 1–2배",
-                       GapMin < 6 * WindowMin, "c. 2–6배",
-                                               "d. 6배 이상")
-| summarize FirstCalls = count(), HitRate = round(1.0 * countif(CacheTok > 0) / count(), 3)
-  by Agent, Bucket
-| order by Agent asc, Bucket asc
-```
+SQL: `queries/metrics/A5.sql`의 `gap_hit`.
 
 - **판정**
   - "보존 시간 밖" 구간의 히트율이 "보존 시간 안" 구간보다 낮으면(단측 검정) A5로 판정한다.
@@ -198,23 +123,11 @@ Calls
 
 **쿼리: 엔드포인트별 히트율.** 에이전트가 호출한 엔드포인트별로 캐시 히트율을 비교해 트래픽 분산(A6)을 확인한다.
 
-```kusto
-Calls
-| summarize Calls = count(), HitRate = round(1.0 * countif(CacheTok > 0) / count(), 3)
-  by Agent, Endpoint
-```
+SQL: `queries/metrics/A6.sql`의 `endpoint_hit`.
 
 **쿼리: 분당 요청 수 구간별 히트율.** 에이전트별 분당 LLM 호출 수를 RpmLimit 대비 구간으로 나눠 히트율을 비교한다. RpmLimit을 넘는 구간에서 생기는 쏠림(A6)을 확인한다.
 
-```kusto
-Calls
-| summarize Rpm = count(), Hits = countif(CacheTok > 0), RpmLimit = any(RpmLimit)
-  by Agent, Minute = bin(TimeGenerated, 1m)
-| extend RpmBucket = case(Rpm <= RpmLimit,     "a. 기준 이하",
-                          Rpm <= 2 * RpmLimit, "b. 기준의 1–2배",
-                                               "c. 기준의 2배 초과")
-| summarize Minutes = count(), HitRate = round(1.0 * sum(Hits) / sum(Rpm), 3) by Agent, RpmBucket
-```
+SQL: `queries/metrics/A6.sql`의 `rpm_hit`.
 
 - **판정**
   - 한 에이전트가 여러 엔드포인트를 쓰고 최저 엔드포인트의 히트율이 최고 엔드포인트보다 낮으면(단측 검정) 분산으로 판정한다. 리전·배포 간 공유 여부는 문서에 명시되지 않았으므로 이 실측값으로 판단한다.

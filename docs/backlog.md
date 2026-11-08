@@ -77,7 +77,7 @@ A 범주의 지표와 낭비 추정은 대부분 3-B에서 측정한 S_a를 입�
 1번으로 기본 뷰(`queries/views.sql`)까지는 로컬로 넘어왔다. 원인별 지표 쿼리 40개는 아직 가이드 본문의 KQL로만 있다. 이 상태로는 추출한 CSV를 두고도 지표를 손으로 다시 써야 한다.
 
 - 원인별 SQL을 `queries/metrics/`에 둔다. 파일 하나가 원인 하나에 대응한다.
-- 가이드 본문의 KQL 블록을 파일 참조로 바꾼다. 코드 블록이 1,114줄 중 389줄, 76KB 중 20.6KB를 차지하므로 5번 Skill 분할에도 바로 효과가 있다.
+- 가이드 본문의 KQL 블록을 파일 참조로 바꾼다. 코드 블록이 1,114줄 중 389줄, 76KB 중 20.6KB를 차지하므로 5번 Skill 분할에도 바로 효과가 있다. (2026-11-09에 41개 블록을 쿼리 이름과 SQL 위치로 바꿨다.)
 - 번역은 기계적이다. `prev()` → `lag()`, `summarize ... by` → `GROUP BY`, `percentile` → `percentile_cont`, `row_number(1, prev(x) != x)` → `row_number() OVER (PARTITION BY x ...)`.
 - 판정 기준값은 SQL에 박지 않는다. 고객 데이터를 보고 보정하는 값이라 설정으로 뺀다.
 - 하위 에이전트 귀속이 필요한 지표(B1, B4, D4)는 `calls.Agent`가 아니라 `calls.OwnerAgent`를 쓴다.

@@ -9,9 +9,22 @@
 // 증거용 원문은 90-content-by-span.kql로 필요한 SpanId만 따로 뽑는다.
 let T0 = datetime(2026-11-01);
 let T1 = datetime(2026-11-02);
+// tool 이름은 정의 배열의 최상위 원소에서 꺼낸다. 정규식으로 "name"을 찾으면 parameters 안의 속성 이름까지 센다.
+// 형식은 OTel의 {"type":"function","name":...}와 OpenAI의 {"function":{"name":...}}를 모두 받는다.
+// mv-apply는 정의가 없는 행을 버리므로 이름만 따로 구해 leftouter로 붙인다.
+let Names = AppGenAIContent
+    | where TimeGenerated >= T0 and TimeGenerated < T1
+    | where isnotempty(ToolDefinitions)
+    | extend Defs = parse_json(ToolDefinitions)
+    | where gettype(Defs) == "array"
+    | mv-apply with_itemindex = Ix D = Defs on (
+        order by Ix asc
+        | summarize NameList = make_list(coalesce(tostring(D.name), tostring(D["function"].name)))
+      )
+    | project TraceId, SpanId, ToolCount = array_length(NameList), ToolNames = strcat_array(NameList, "|");
 AppGenAIContent
 | where TimeGenerated >= T0 and TimeGenerated < T1
-| extend ToolNamesArr = extract_all(@'"name"\s*:\s*"([^"]+)"', tostring(ToolDefinitions))
+| join kind=leftouter Names on TraceId, SpanId
 | project
     TimeGenerated,
     TraceId,
@@ -22,8 +35,8 @@ AppGenAIContent
     SysHeadHash   = iff(isempty(SystemInstructions), "", hash_sha256(substring(SystemInstructions, 0, 4000))),
     ToolDefsChars = strlen(ToolDefinitions),
     ToolDefsHash  = iff(isempty(ToolDefinitions), "", hash_sha256(ToolDefinitions)),
-    ToolCount     = coalesce(array_length(ToolNamesArr), 0),
-    ToolNames     = strcat_array(ToolNamesArr, "|"),
+    ToolCount     = coalesce(ToolCount, 0),
+    ToolNames     = coalesce(ToolNames, ""),
     InChars       = strlen(InputMessages),
     InHash        = iff(isempty(InputMessages), "", hash_sha256(InputMessages)),
     OutChars      = strlen(OutputMessages),

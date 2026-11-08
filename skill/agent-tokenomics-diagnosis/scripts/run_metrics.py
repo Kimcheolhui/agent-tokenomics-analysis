@@ -132,7 +132,7 @@ def main():
 
     # 점검 뷰도 함께 담는다. 빌더가 계측 부재와 모델 매칭을 판정할 때 쓴다.
     result["_checks"] = {}
-    for v in ("overview", "instrumentation", "unpriced_calls", "missing_sa", "data_presence"):
+    for v in ("overview", "instrumentation", "unpriced_calls", "missing_sa", "data_presence", "turn_trace_check"):
         cur = con.execute(f"SELECT * FROM {v}")
         cols = [d[0] for d in cur.description]
         result["_checks"][v] = [{c: js(x) for c, x in zip(cols, row)} for row in cur.fetchall()]

@@ -14,26 +14,11 @@
 
 **쿼리: Tool별 실패율.** `execute_tool` span의 성공 여부로 tool별 실패 건수와 실패율을 구하고 오류 유형 예시를 붙인다. 실패가 잦은 tool(F1)을 찾는다.
 
-```kusto
-Tools
-| summarize Calls = count(), Failed = countif(Success == false),
-            FailRate = round(1.0 * countif(Success == false) / count(), 3),
-            SampleErr = take_anyif(ToolErr, isnotempty(ToolErr))
-  by ToolName
-| order by Failed desc
-```
+SQL: `queries/metrics/F1.sql`의 `tool_failures`, `error_types`.
 
 **쿼리: 실패 턴과 정상 턴 비교.** tool 실패가 있는 턴과 없는 턴의 비용 중앙값, 호출 수 중앙값을 나란히 구한다. 실패가 비용을 얼마나 키우는지(F1) 본다.
 
-```kusto
-let FailTurns = Tools | summarize HasFail = countif(Success == false) > 0 by OperationId;
-Calls
-| summarize TurnCost = sum(Cost), N = max(CallIdx) by Agent, OperationId
-| join kind=leftouter FailTurns on OperationId
-| extend HasFail = coalesce(HasFail, false)
-| summarize Turns = count(), P50TurnCost = percentile(TurnCost, 50), P50Calls = percentile(N, 50),
-            TotalCost = sum(TurnCost) by Agent, HasFail
-```
+SQL: `queries/metrics/F1.sql`의 `fail_vs_ok_turns`.
 
 - **판정**
   - 특정 tool의 실패가 반복되고(2건 이상), 실패 턴의 비용 중앙값이 정상 턴보다 크면 F1로 판정한다. 실패율의 수치 기준은 두지 않고 실패 턴과 정상 턴의 비용을 비교한다.
@@ -51,19 +36,9 @@ Calls
 
 **쿼리: LLM 호출 실패와 재요청.** 실패로 끝난 LLM 호출과, 같은 턴에서 직전과 거의 같은 Input으로 다시 보낸 호출을 세고 비용을 구한다. F2를 확인한다.
 
-```kusto
-Calls
-| extend PrevIn     = iff(CallIdx > 1, prev(InTok), long(null)),
-         PrevFinish = iff(CallIdx > 1, prev(Finish), "")
-| extend Failed = Success == false or Finish contains "content_filter" or Finish contains "error",
-         Resend = isnotnull(PrevIn) and abs(InTok - PrevIn) <= 50 and not(PrevFinish contains "tool_calls")
-| summarize Calls = count(), FailedCalls = countif(Failed),
-            FailedCost = round(sumif(Cost, Failed), 2),
-            Resends = countif(Resend), ResendCost = round(sumif(Cost, Resend), 2)
-  by Agent
-```
+SQL: `queries/metrics/F2.sql`의 `llm_failures`, `error_breakdown`.
 
-실패 호출은 `ResultCode`와 `tostring(Properties["error.type"])`로 다시 나눠 본다.
+실패 호출은 `ResultCode`와 `error.type`으로 다시 나눠 본다(`error_breakdown`).
 
 - **판정**
   - 실패 호출이나 재요청이 반복되면(2건 이상) F2 후보로 올린다. 실패 비율의 수치 기준은 두지 않는다. 비용은 낭비 추정으로 보인다.
@@ -81,32 +56,13 @@ Calls
 
 **쿼리: 빠른 재입력 비율.** 같은 대화에서 직전 턴이 끝나고 60초 안에 시작된 턴의 비율을 구한다. 재질문(F3)을 텔레메트리만으로 근사할 때 쓴다.
 
-```kusto
-Spans
-| where Op == "invoke_agent"
-| summarize arg_min(TimeGenerated, DurationMs, Properties) by OperationId
-| extend Conv = tostring(Properties["gen_ai.conversation.id"]),
-         TurnEnd = datetime_add('millisecond', toint(DurationMs), TimeGenerated)
-| where isnotempty(Conv)
-| sort by Conv asc, TimeGenerated asc
-| extend GapSec = iff(prev(Conv) == Conv, datetime_diff('second', TimeGenerated, prev(TurnEnd)), long(null))
-| summarize Turns = count(),
-            QuickRetryRate = round(1.0 * countif(GapSec between (0 .. 60)) / count(), 3)
-```
+SQL: `queries/metrics/F3.sql`의 `quick_reinput`.
 
 **쿼리: 대화별 사용자 메시지 추출.** 턴 첫 호출의 `InputMessages`에서 마지막 user 메시지를 꺼내 대화·시간순으로 정렬한다. 연속 메시지 유사도 계산(F3)의 입력으로 쓴다.
 
-```kusto
-Calls
-| where CallIdx == 1 and isnotempty(Conv)
-| join kind=inner (Content | project SpanId, InputMessages) on $left.Id == $right.SpanId
-| mv-apply M = parse_json(InputMessages) on (
-      where tostring(M.role) == "user" | summarize Users = make_list(M))
-| project Conv, TimeGenerated, UserText = tostring(Users[-1].parts[0].content)
-| order by Conv asc, TimeGenerated asc
-```
+SQL: `queries/metrics/F3.sql`의 `quick_pairs`.
 
-두 번째 쿼리로 대화별 사용자 메시지를 뽑은 뒤, 연속 메시지의 임베딩 유사도는 Python 등으로 계산한다. 메시지 구조(`parts[0].content`)는 계측에 따라 다를 수 있으니 실제 JSON을 먼저 확인한다.
+`quick_pairs`로 SpanId를 특정한 뒤 `queries/export/90-content-by-span.kql`로 원문을 받고, 연속 메시지의 임베딩 유사도는 Python 등으로 계산한다. 메시지 구조(`parts[0].content`)는 계측에 따라 다를 수 있으니 실제 JSON을 먼저 확인한다.
 
 - **판정**: \[C\] 재질문 비율이 높고, 재질문 직전 턴의 응답이 샘플에서 불완전하거나 엉뚱하면 F3로 판정한다. 빠른 재입력 비율의 수치 기준은 두지 않는다. \[T\] 근사만 있으면 비율과 직전 턴 비용을 기록하고 판정을 보류한다. 빠른 재입력이 꼭 재질문은 아니기 때문이다.
 - **낭비 추정**: Σ(재질문 직전 턴) 턴 비용.
@@ -119,16 +75,7 @@ Calls
 
 **쿼리: 실패 턴 비용.** 루트 `invoke_agent`의 성공 여부로 실패 턴 비율, 실패 턴 비용 비중, 실패·정상 턴의 평균 호출 수를 구한다. F4를 확인한다.
 
-```kusto
-Calls
-| summarize TurnCost = sum(Cost), N = max(CallIdx), TurnOk = any(TurnOk) by Agent, OperationId
-| summarize Turns = count(),
-            FailTurnRate  = round(1.0 * countif(TurnOk == false) / count(), 3),
-            FailCostShare = round(sumif(TurnCost, TurnOk == false) / sum(TurnCost), 3),
-            AvgCallsFail  = round(avgif(N, TurnOk == false), 1),
-            AvgCallsOk    = round(avgif(N, TurnOk == true), 1)
-  by Agent
-```
+SQL: `queries/metrics/F4.sql`의 `failed_turns`.
 
 - **판정**
   - 늦은 실패 계수(FailCostShare ÷ FailTurnRate)가 1.5 이상이면, 실패 턴이 평균 턴보다 1.5배 넘게 비싼 것이므로 많이 쓰고 나서 실패하는 "늦은 실패"로 판정한다(초기값). 1을 넘으면 실패 턴이 평균보다 비싸다는 뜻이고, 0.5는 잡음 여유다. D1, F1과 연결해 본다.

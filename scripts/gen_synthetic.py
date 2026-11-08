@@ -20,7 +20,7 @@
 
 사용:  python3 scripts/gen_synthetic.py --out /tmp/synth --days 3 --seed 7
 """
-import argparse, csv, datetime as dt, hashlib, pathlib, random, re
+import json, argparse, csv, datetime as dt, hashlib, pathlib, random, re
 from collections import Counter, defaultdict
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
@@ -58,6 +58,7 @@ class Gen:
         self.last_seen = {}                 # agent -> t
         self.rpm = Counter()                # (agent, minute) -> n
         self.conv = {}                      # conv -> dict(hist, last_end, turns)
+        self.last_tool_ms = 0
 
     def sid(self, p):
         self.n += 1
@@ -96,7 +97,7 @@ class Gen:
         sp = self.sid("c")
         self.add("calls", TimeGenerated=self.iso(t), OperationId=op, SpanId=sp, ParentId=parent, Op="chat",
                  Agent="", ConvId=conv, Model=model, RequestModel="dep-" + model, InTok=in_tok, CacheTok=hit,
-                 WriteTok=0, OutTok=out_tok, ReasonTok=reason, Finish=finish, Status=status,
+                 WriteTok=0, OutTok=out_tok, ReasonTok=reason, Finish=json.dumps([finish]), Status=status,
                  MaxTok=max_tok if max_tok else "", ReasonLevel="high" if model == "gpt-5.4" else "low",
                  Compacted="", Endpoint="ep1" if r.random() < 0.9 or agent != "order-agent" else "ep2",
                  ErrorType="", Success="true", ResultCode=200, DurationMs=int(300 + out_tok * 4))
@@ -114,9 +115,10 @@ class Gen:
 
     def tool(self, t, op, parent, name, ok, args, result_tok):
         sp = self.sid("tl")
+        self.last_tool_ms = self.r.randint(80, 900)
         self.add("tools", TimeGenerated=self.iso(t), OperationId=op, SpanId=sp, ParentId=parent, ToolName=name,
                  ToolCallId="call-" + sp, Success="true" if ok else "false", ResultCode=200 if ok else 500,
-                 ErrorType="" if ok else "ArgumentError", DurationMs=self.r.randint(80, 900))
+                 ErrorType="" if ok else "ArgumentError", DurationMs=self.last_tool_ms)
         self.add("content_digest", TimeGenerated=self.iso(t), TraceId=op, SpanId=sp, AgentName="support-router",
                  SysChars="", SysHash="", SysHeadHash="", ToolDefsChars="", ToolDefsHash="", ToolCount=0,
                  ToolNames="", InChars="", InHash="", OutChars="", OutHash="", ArgsChars=len(args),
@@ -132,7 +134,7 @@ class Gen:
                     d = f"doc-{self.r.randint(1, 400)}"
                 seen.append(d)
                 score = self.r.random() * (0.5 if i >= 4 else 1.0)  # C3: 하위 문서는 저점수
-                self.add("retrieval", TimeGenerated=self.iso(t), OperationId=op, SpanId=rs, ParentId=parent,
+                self.add("retrieval", TimeGenerated=self.iso(t), OperationId=op, SpanId=rs, ParentId=sp,
                          TopK=10, DocCount=10, DocId=d, Score=round(score, 3))
         return sp
 
@@ -187,33 +189,39 @@ class Gen:
             if tool_name == "search_faq" and r.random() < 0.30:
                 ok = False
             args = '{"q": "same"}' if loop else f'{{"q": "{r.random()}"}}'
-            self.tool(t, op, sp, tool_name, ok, args, res_tok)
+            self.tool(t, op, root, tool_name, ok, args, res_tok)
+            t += dt.timedelta(milliseconds=self.last_tool_ms + 20)
             used.append(tool_name)
             if not ok:
                 # F1: 실패 후 재시도
                 ctx += 150
                 sp, in_tok = step("support-router", root, "tool_calls", 90, 200)
-                self.tool(t, op, sp, tool_name, True, args, res_tok)
+                self.tool(t, op, root, tool_name, True, args, res_tok)
+                t += dt.timedelta(milliseconds=self.last_tool_ms + 20)
             ctx += res_tok if ok or True else 0
             if k < repeats - 1:
                 sp, in_tok = step("support-router", root, "tool_calls", 70, 150)
         # 3) 하위 에이전트 위임 (D4)
         if sub:
             sub_agent = "refund-agent" if route == "refund" else "order-agent"
-            self.tool(t, op, sp, "delegate_refund" if sub_agent == "refund-agent" else "delegate_order",
-                      True, "{}", 50)
+            dsp = self.tool(t, op, root, "delegate_refund" if sub_agent == "refund-agent" else "delegate_order",
+                            True, "{}", 50)
+            t += dt.timedelta(milliseconds=20)
             ssp = self.sid("ag")
-            self.add("agent_spans", TimeGenerated=self.iso(t), OperationId=op, SpanId=ssp, ParentId=root,
+            # 에이전트를 tool로 부르는 구조: 하위 invoke_agent의 부모는 위임 tool span이다
+            self.add("agent_spans", TimeGenerated=self.iso(t), OperationId=op, SpanId=ssp, ParentId=dsp,
                      Agent=sub_agent, ConvId="", Success="true", ResultCode="", ErrorType="", DurationMs=1500)
             share = 0.9 if sub_agent == "refund-agent" else 0.15
             base = S_TOK[sub_agent] + int(ctx * share)
             sp2, _ = step(sub_agent, ssp, "tool_calls", 60, 0, first=True, base=base)
-            self.tool(t, op, sp2, "lookup_order" if sub_agent == "order-agent" else "get_refund_policy", True,
+            self.tool(t, op, ssp, "lookup_order" if sub_agent == "order-agent" else "get_refund_policy", True,
                       '{"id": 1}', 600)
+            t += dt.timedelta(milliseconds=self.last_tool_ms + 20)
             step(sub_agent, ssp, "stop", 150, 0, base=base + 700)
             ctx += 200
         if r.random() < 0.10:
-            self.tool(t, op, sp, "create_ticket", True, '{"k": 1}', 80)
+            self.tool(t, op, root, "create_ticket", True, '{"k": 1}', 80)
+            t += dt.timedelta(milliseconds=self.last_tool_ms + 20)
         # 4) 최종 응답 (E3, E4)
         final_out = int(min(max(r.gauss(450, 250), 60), 1800))
         truncated = r.random() < 0.03

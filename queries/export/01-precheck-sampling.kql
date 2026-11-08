@@ -1,0 +1,12 @@
+//! name: precheck-sampling
+//! columns: Table,Spans,Items,MaxItemCount
+//! sensitive: false
+// 샘플링 여부 확인. ItemCount가 1보다 큰 행이 있으면 Application Insights가 span을 일부만 저장하고 있어
+// 호출 수·비용 합계가 실제보다 작게 나온다. 이 폴더의 지표는 ItemCount를 보정하지 않는다.
+// Items가 Spans와 같고 MaxItemCount가 1이면 샘플링이 없다.
+let T0 = datetime(2026-11-01);
+let T1 = datetime(2026-11-02);
+union withsource = Table AppDependencies, AppRequests
+| where TimeGenerated >= T0 and TimeGenerated < T1
+| where isnotempty(tostring(Properties["gen_ai.operation.name"]))
+| summarize Spans = count(), Items = sum(ItemCount), MaxItemCount = max(ItemCount) by Table

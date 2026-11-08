@@ -41,30 +41,15 @@ print(len(enc.encode(system_instructions)), len(enc.encode(tool_definitions_json
 
 **쿼리: 턴 첫 호출 Input 분포(측정법 3).** 턴 첫 호출 InTok의 1백분위수를 S\_a의 하한 근사로 쓴다. 실험 호출이나 원문으로 S\_a를 잴 수 없을 때의 대안이다.
 
-```kusto
-Calls
-| where CallIdx == 1
-| summarize FirstCalls = count(), P01 = percentile(InTok, 1), P50 = percentile(InTok, 50) by Agent
-```
+SQL: `queries/metrics/B-common.sql`의 `first_call_dist`.
 
 **고정 Input 비용 비중** = Σ(S\_a × 에이전트 a의 LLM 호출 수 × P\_eff) ÷ 전체 비용. 고정 Input이 비용에서 차지하는 비중이며, 0.3 이상이면 B 범주를 점검한다(초기값). P\_eff에 캐시 효과가 들어 있어서, 캐시가 잘 맞는 에이전트는 토큰이 커도 비중이 낮게 나온다.
 
 **쿼리: 고정 Input 비용 비중.** 에이전트별로 S\_a × LLM 호출 수 × P\_eff로 고정 Input 비용을 구하고, 그 에이전트 전체 비용 대비 비중을 계산한다. 전체 비중은 FixedCost 합 ÷ Cost 합으로 구한다. B 범주를 점검할지 판단할 때 쓴다.
 
-```kusto
-let S = datatable(Agent:string, STok:long) [ "<에이전트명>", 0 ];   // 측정법 1–3으로 구한 S_a
-Calls
-| summarize Calls = count(), Cost = sum(Cost),
-            CacheRate = 1.0 * sum(CacheTok) / sum(InTok),
-            PIn = any(PIn), PCache = any(PCache) by Agent
-| join kind=inner S on Agent
-| extend PEff = (1 - CacheRate) * PIn + CacheRate * PCache
-| extend FixedCost = STok * Calls * PEff / 1e6
-| project Agent, Calls, STok, CacheRate = round(CacheRate, 3), FixedCost, Cost,
-          FixedCostShare = round(FixedCost / Cost, 3)
-```
+SQL: `queries/metrics/B-common.sql`의 `fixed_share`, `overall`.
 
-한 에이전트가 여러 모델을 쓰면 단가를 `any()`로 하나만 가져오므로, 이 경우 Agent와 Model로 나눠 계산한다.
+한 에이전트가 여러 모델을 쓰면 그중 한 모델의 단가만 쓰므로, 이 경우 Agent와 Model로 나눠 계산한다.
 
 ### B1. 미사용 Tool 상시 전송
 
@@ -74,23 +59,7 @@ Calls
 
 **쿼리: Tool별 사용률.** 최근 `ToolDefinitions`에서 정의된 tool 목록을 뽑고, `execute_tool` span으로 실제 호출된 턴 수를 붙인다. 정의만 되어 있고 쓰이지 않는 tool(B1)을 찾는다.
 
-```kusto
-let TurnsByAgent = Calls | where CallIdx == 1 | summarize AgentTurns = count() by Agent;
-let Defined = Content
-    | where isnotempty(ToolDefinitions)
-    | summarize arg_max(TimeGenerated, ToolDefinitions) by Agent = AgentName
-    | mv-expand ToolName = extract_all(@'"name"\s*:\s*"([^"]+)"', ToolDefinitions) to typeof(string)
-    | project Agent, ToolName;
-let Used = Tools
-    | join kind=leftouter Turns on OperationId
-    | summarize UsedTurns = dcount(OperationId) by Agent = RootAgent, ToolName;
-Defined
-| join kind=leftouter Used on Agent, ToolName
-| join kind=leftouter TurnsByAgent on Agent
-| project Agent, ToolName, UsedTurns = coalesce(UsedTurns, 0),
-          UseRate = round(1.0 * coalesce(UsedTurns, 0) / AgentTurns, 4)
-| order by Agent asc, UseRate asc
-```
+SQL: `queries/metrics/B1.sql`의 `tool_use`.
 
 - **판정**
   - 관찰 기간(최소 2주) 동안 0회이거나 사용률 1% 미만이고, 해당 tool의 토큰이 크면 B1로 판정한다.
@@ -106,17 +75,7 @@ Defined
 
 **쿼리: Tool별 정의 크기.** 최근 `ToolDefinitions`를 tool 단위로 펼쳐 정의 전체와 description의 문자 수를 구한다. 다른 tool보다 유난히 긴 schema(B2)를 찾는다.
 
-```kusto
-Content
-| where isnotempty(ToolDefinitions)
-| summarize arg_max(TimeGenerated, ToolDefinitions) by AgentName
-| mv-expand T = parse_json(ToolDefinitions)
-| extend ToolName  = coalesce(tostring(T.name), tostring(T["function"].name)),
-         Chars     = strlen(tostring(T)),
-         DescChars = strlen(coalesce(tostring(T.description), tostring(T["function"].description)))
-| project AgentName, ToolName, Chars, DescChars
-| order by AgentName asc, Chars desc
-```
+SQL: `queries/metrics/B2.sql`의 `tool_schema_size`.
 
 - **판정**: 정의 크기가 같은 에이전트 tool 중앙값의 3배 이상이면 후보로 올린다. 리뷰에서 긴 enum, 반복 설명, 사용 예시가 대부분을 차지하면 B2로 판정한다.
 - **낭비 추정**: 리뷰로 산정한 축약 가능 토큰 × 에이전트 LLM 호출 수 × P\_eff.
@@ -132,12 +91,7 @@ Content
 
 **쿼리: 에이전트별 최신 System prompt.** 에이전트마다 가장 최근 `SystemInstructions` 원문과 길이를 꺼낸다. 토큰화와 구성 요소 리뷰(B3)의 입력으로 쓴다.
 
-```kusto
-Content
-| where isnotempty(SystemInstructions)
-| summarize arg_max(TimeGenerated, SystemInstructions) by AgentName
-| project AgentName, SysChars = strlen(SystemInstructions), SystemInstructions
-```
+SQL: `queries/metrics/B3.sql`의 `system_prompt_size`.
 
 - **판정**
   - 고정 Input 비용 비중이 0.3 이상이고, 리뷰에서 예시·참조 데이터·중복 규칙이 큰 비중이면 B3로 판정한다.
@@ -152,14 +106,7 @@ Content
 
 **쿼리: 에이전트별 고정 Input 크기.** 에이전트마다 System prompt 길이, tool 정의 길이, 정의된 tool 수를 구한다. 하위 에이전트끼리 비교해 중복(B4)을 찾는다.
 
-```kusto
-Content
-| where isnotempty(SystemInstructions) or isnotempty(ToolDefinitions)
-| summarize SysChars  = max(strlen(SystemInstructions)),
-            ToolChars = max(strlen(ToolDefinitions)),
-            ToolCount = max(array_length(extract_all(@'"name"\s*:\s*"([^"]+)"', ToolDefinitions)))
-  by AgentName
-```
+SQL: `queries/metrics/B4.sql`의 `agent_fixed_size`.
 
 - **판정**: 하위 에이전트 S\_a가 상위와 비슷하거나 공통 블록이 여러 에이전트에 반복되고, 하위 에이전트의 tool 사용률이 낮으면 B4로 판정한다.
 - **낭비 추정**: Σ(에이전트 a) (S\_a − 역할에 필요한 토큰) × 에이전트 a의 LLM 호출 수 × P\_eff.
