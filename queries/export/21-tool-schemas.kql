@@ -1,0 +1,19 @@
+//! name: tool_schemas
+//! columns: AgentName,CapturedAt,ToolName,Chars,DescChars
+//! sensitive: false
+// 에이전트별 최신 ToolDefinitions를 tool 단위로 펼쳐 정의 크기와 description 크기만 내린다.
+// B2(장황한 Tool schema) 비교와 B1 정의 tool 목록에 쓴다. 설명 원문은 내리지 않는다.
+// 기간을 일 단위로 쪼개 돌리면 날짜마다 1세트가 나온다. 로컬에서 CapturedAt 최대값을 쓴다.
+let T0 = datetime(2026-11-01);
+let T1 = datetime(2026-11-02);
+AppGenAIContent
+| where TimeGenerated >= T0 and TimeGenerated < T1
+| where isnotempty(ToolDefinitions)
+| summarize arg_max(TimeGenerated, ToolDefinitions) by AgentName
+| mv-expand T = parse_json(ToolDefinitions)
+| project
+    AgentName,
+    CapturedAt      = TimeGenerated,
+    ToolName  = coalesce(tostring(T.name), tostring(T["function"].name)),
+    Chars     = strlen(tostring(T)),
+    DescChars = strlen(coalesce(tostring(T.description), tostring(T["function"].description)))

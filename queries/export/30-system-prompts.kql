@@ -1,0 +1,13 @@
+//! name: system_prompts
+//! columns: AgentName,CapturedAt,SysChars,SystemInstructions
+//! sensitive: true
+// 에이전트별 최신 System prompt 원문. B3 구성 요소 리뷰와 S_a 측정법 2(tiktoken)의 입력이다.
+// 고객 콘텐츠가 로컬에 저장된다. --include-sensitive로만 실행된다.
+// 에이전트 수만큼의 행이므로 분량은 작다.
+let T0 = datetime(2026-11-01);
+let T1 = datetime(2026-11-02);
+AppGenAIContent
+| where TimeGenerated >= T0 and TimeGenerated < T1
+| where isnotempty(SystemInstructions)
+| summarize arg_max(TimeGenerated, SystemInstructions) by AgentName
+| project AgentName, CapturedAt = TimeGenerated, SysChars = strlen(SystemInstructions), SystemInstructions

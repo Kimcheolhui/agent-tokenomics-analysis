@@ -1,0 +1,20 @@
+//! name: tools
+//! columns: TimeGenerated,OperationId,SpanId,ParentId,ToolName,ToolCallId,Success,ResultCode,ErrorType,DurationMs
+//! sensitive: false
+// execute_tool span 1건 = 1행. B1 사용률, C2 결과 크기, D1 중복, D2 라운드당 tool 수, F1 실패율에 쓴다.
+let T0 = datetime(2026-11-01);
+let T1 = datetime(2026-11-02);
+union AppDependencies, AppRequests
+| where TimeGenerated >= T0 and TimeGenerated < T1
+| where tostring(Properties["gen_ai.operation.name"]) == "execute_tool"
+| project
+    TimeGenerated,
+    OperationId,
+    SpanId     = Id,
+    ParentId,
+    ToolName   = tostring(Properties["gen_ai.tool.name"]),
+    ToolCallId = tostring(Properties["gen_ai.tool.call.id"]),
+    Success,
+    ResultCode,
+    ErrorType  = tostring(Properties["error.type"]),
+    DurationMs

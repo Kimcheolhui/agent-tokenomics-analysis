@@ -1,0 +1,23 @@
+//! name: agent_spans
+//! columns: TimeGenerated,OperationId,SpanId,ParentId,Agent,ConvId,Success,ResultCode,ErrorType,DurationMs
+//! sensitive: false
+// invoke_agent span 전체. 루트만 뽑지 않는다.
+// D4(에이전트 간 컨텍스트 중복)가 루트가 아닌 invoke_agent span을 하위 에이전트로 쓰기 때문이다.
+// 루트는 OperationId별 최초 span으로 로컬에서 정한다.
+// DurationMs는 F3의 턴 종료 시각 계산에 쓴다.
+let T0 = datetime(2026-11-01);
+let T1 = datetime(2026-11-02);
+union AppDependencies, AppRequests
+| where TimeGenerated >= T0 and TimeGenerated < T1
+| where tostring(Properties["gen_ai.operation.name"]) == "invoke_agent"
+| project
+    TimeGenerated,
+    OperationId,
+    SpanId    = Id,
+    ParentId,
+    Agent     = tostring(Properties["gen_ai.agent.name"]),
+    ConvId    = tostring(Properties["gen_ai.conversation.id"]),
+    Success,
+    ResultCode,
+    ErrorType = tostring(Properties["error.type"]),
+    DurationMs

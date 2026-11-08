@@ -1,0 +1,3 @@
+Model,PIn,PCache,PWrite,POut,MinTok,Round128,WindowMin,RpmLimit
+gpt-5.4,2.00,0.20,0.00,8.00,1024,true,5.0,15
+gpt-5-mini,0.40,0.04,0.00,1.60,1024,true,5.0,15

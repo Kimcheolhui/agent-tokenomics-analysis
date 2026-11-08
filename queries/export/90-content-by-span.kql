@@ -1,0 +1,17 @@
+//! name: content_by_span
+//! columns: TimeGenerated,TraceId,SpanId,AgentName,SystemInstructions,InputMessages,OutputMessages,ToolDefinitions,ToolCallArguments,ToolCallResult
+//! sensitive: true
+//! spans: SPAN_IDS
+// 지정한 SpanId의 content 원문만 뽑는다. 1차 분석으로 SpanId를 특정한 뒤 2차로 돌린다.
+// 쓰는 곳: A1·A2 diff 그림의 변형 2건, F3 사용자 메시지 유사도, C2·D3 샘플 리뷰.
+// 고객 콘텐츠가 로컬에 저장된다. --spans와 --include-sensitive가 함께 있어야 실행된다.
+// 필요 없는 컬럼은 project에서 지운다.
+let T0 = datetime(2026-11-01);
+let T1 = datetime(2026-11-02);
+let SpanIds = dynamic(["SPAN_IDS"]);
+AppGenAIContent
+| where TimeGenerated >= T0 and TimeGenerated < T1
+| where SpanId in (SpanIds)
+| project TimeGenerated, TraceId, SpanId, AgentName,
+          SystemInstructions, InputMessages, OutputMessages,
+          ToolDefinitions, ToolCallArguments, ToolCallResult
