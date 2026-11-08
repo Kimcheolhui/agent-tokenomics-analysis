@@ -35,3 +35,7 @@ WITH g AS (SELECT OperationId, ToolName, count(*) AS Cnt FROM tools GROUP BY 1, 
 SELECT ToolName, count(*) AS Turns, count(*) FILTER (WHERE Cnt >= thrn('repeat_tool_calls')) AS RepeatTurns,
        round(1.0 * count(*) FILTER (WHERE Cnt >= thrn('repeat_tool_calls')) / count(*), 4) AS RepeatShare
 FROM g GROUP BY ToolName ORDER BY RepeatTurns DESC
+
+-- @query n_hist
+-- 턴당 LLM 호출 수 분포. 그림용.
+SELECT least(N, 15) AS N, count(*) AS Turns FROM turn_cost GROUP BY 1 ORDER BY 1

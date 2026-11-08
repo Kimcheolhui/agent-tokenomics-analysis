@@ -16,3 +16,8 @@ SELECT t.ToolName, count(*) AS Calls, round(quantile_cont(c.ResultChars, 0.5) / 
 FROM tools t JOIN content c ON c.SpanId = t.SpanId AND c.OperationId = t.OperationId
 WHERE c.ResultChars IS NOT NULL AND list_contains(string_split(thrs('search_tools'), ','), t.ToolName)
 GROUP BY 1
+
+-- @query score_hist
+-- 반환 문서 점수 분포(0.1 단위). 그림용.
+SELECT least(floor(Score * 10), 9)::INTEGER AS Bin, count(*) AS Docs
+FROM retrieval WHERE DocId IS NOT NULL AND Score IS NOT NULL GROUP BY 1 ORDER BY 1

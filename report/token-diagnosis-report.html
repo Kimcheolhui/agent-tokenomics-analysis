@@ -1508,7 +1508,7 @@ function renderMast() {
     el('h1', { text: m.title }),
     el('p', { class: 'mast-sub', text: `${m.customer} · ${m.service}` }),
     el('dl', { class: 'mast-meta' }, items.map(([k, v]) => el('div', {}, el('dt', { text: k }), el('dd', { text: v })))),
-    m.sample ? el('p', { class: 'sample' }, icon('info'), el('span', { text: '예시 데이터로 채운 템플릿이다. 숫자와 이름은 실제 고객 값이 아니다. 채우는 방법은 페이지 맨 아래 "템플릿 채우는 법"에 있다.' })) : null,
+    ...(m.sample ? [el('p', { class: 'sample' }, icon('info'), el('span', { text: '예시 데이터로 채운 템플릿이다. 숫자와 이름은 실제 고객 값이 아니다. 채우는 방법은 페이지 맨 아래 "템플릿 채우는 법"에 있다.' }))] : []),
   );
 }
 

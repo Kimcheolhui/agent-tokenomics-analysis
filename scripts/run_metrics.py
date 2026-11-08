@@ -62,6 +62,36 @@ def inline_params(sql, params):
     return re.sub(r"thrs\('([^']+)'\)", txt, sql)
 
 
+OPTIONAL = ["agent_spans", "tools", "retrieval", "content_digest", "tool_schemas"]
+
+
+def export_columns(name):
+    """queries/export/*.kql 머리의 //! name, //! columns 선언."""
+    for f in (REPO / "queries" / "export").glob("*.kql"):
+        t = f.read_text(encoding="utf-8")
+        n = re.search(r"//!\s*name:\s*(\S+)", t)
+        if n and n.group(1) == name:
+            return [c.strip() for c in re.search(r"//!\s*columns:\s*(.*)", t).group(1).split(",")]
+    return []
+
+
+def patch_missing_sources(views_sql, root):
+    """data/<name>/에 CSV가 없는 선택 테이블은 헤더만 있는 임시 CSV로 바꾼다. 필수인 calls는 없으면 멈춘다."""
+    import tempfile
+    if not list((root / "data" / "calls").glob("*.csv")):
+        sys.exit(f"data/calls/*.csv가 없다 ({root}). scripts/export.py로 먼저 추출한다.")
+    missing = []
+    tmp = pathlib.Path(tempfile.mkdtemp(prefix="tokenomics_empty_"))
+    for name in OPTIONAL:
+        if not list((root / "data" / name).glob("*.csv")):
+            d = tmp / name
+            d.mkdir()
+            (d / "empty.csv").write_text(",".join(export_columns(name)) + "\n", encoding="utf-8")
+            views_sql = views_sql.replace(f"'data/{name}/*.csv'", f"'{d}/empty.csv'")
+            missing.append(name)
+    return views_sql, missing
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--root", default=".", help="data/와 config/가 있는 디렉터리")
@@ -77,7 +107,10 @@ def main():
     os.chdir(root)
 
     con = duckdb.connect()
-    con.execute((REPO / "queries" / "views.sql").read_text(encoding="utf-8"))
+    views, missing = patch_missing_sources((REPO / "queries" / "views.sql").read_text(encoding="utf-8"), root)
+    if missing:
+        print(f"[note] 데이터 없음, 빈 표로 처리: {', '.join(missing)}", file=sys.stderr)
+    con.execute(views)
     sel = set(x.strip() for x in a.only.split(",")) if a.only else None
     params = load_params(root)
 
@@ -99,7 +132,7 @@ def main():
 
     # 점검 뷰도 함께 담는다. 빌더가 계측 부재와 모델 매칭을 판정할 때 쓴다.
     result["_checks"] = {}
-    for v in ("overview", "instrumentation", "unpriced_calls", "missing_sa"):
+    for v in ("overview", "instrumentation", "unpriced_calls", "missing_sa", "data_presence"):
         cur = con.execute(f"SELECT * FROM {v}")
         cols = [d[0] for d in cur.description]
         result["_checks"][v] = [{c: js(x) for c, x in zip(cols, row)} for row in cur.fetchall()]

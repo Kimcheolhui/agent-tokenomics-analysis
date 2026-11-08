@@ -261,7 +261,8 @@ def check_causes(v, cs, symptom_ids):
                 if isinstance(w.get("usd"), NUM) and w["usd"] < 0:
                     v.err(p + ".waste.usd", "음수다")
         if vd in ("해당", "후보"):
-            v.req(c, "finding", p, "str")
+            if w:
+                v.req(c, "finding", p, "str")          # 카드는 finding을 보여 준다
             if not w:
                 v.warn(p, "해당/후보인데 낭비 추정(waste)이 없어 3장 카드가 만들어지지 않는다. basis가 있어야 4장 표에 나온다")
         if not card:

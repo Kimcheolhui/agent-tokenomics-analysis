@@ -41,43 +41,45 @@ CREATE OR REPLACE VIEW calls_raw AS
   SELECT * FROM read_csv_auto('data/calls/*.csv', header = true, union_by_name = true);
 
 CREATE OR REPLACE VIEW agent_spans AS
-  SELECT TimeGenerated, OperationId, SpanId, blank(ParentId) AS ParentId,
-         blank(Agent) AS Agent, blank(ConvId) AS ConvId, Success,
-         blank(ResultCode) AS ResultCode, blank(ErrorType) AS ErrorType, DurationMs
-  FROM read_csv_auto('data/agent_spans/*.csv', header = true, union_by_name = true);
+  SELECT try_cast(TimeGenerated AS TIMESTAMPTZ) AS TimeGenerated, OperationId, SpanId, blank(ParentId) AS ParentId,
+         blank(Agent) AS Agent, blank(ConvId) AS ConvId, try_cast(Success AS BOOLEAN) AS Success,
+         blank(ResultCode) AS ResultCode, blank(ErrorType) AS ErrorType, try_cast(DurationMs AS BIGINT) AS DurationMs
+  FROM read_csv_auto('data/agent_spans/*.csv', header = true, union_by_name = true, all_varchar = true);
 
 CREATE OR REPLACE VIEW tools AS
-  SELECT TimeGenerated, OperationId, SpanId, blank(ParentId) AS ParentId,
-         blank(ToolName) AS ToolName, blank(ToolCallId) AS ToolCallId, Success,
-         blank(ResultCode) AS ResultCode, blank(ErrorType) AS ErrorType, DurationMs
-  FROM read_csv_auto('data/tools/*.csv', header = true, union_by_name = true);
+  SELECT try_cast(TimeGenerated AS TIMESTAMPTZ) AS TimeGenerated, OperationId, SpanId, blank(ParentId) AS ParentId,
+         blank(ToolName) AS ToolName, blank(ToolCallId) AS ToolCallId, try_cast(Success AS BOOLEAN) AS Success,
+         blank(ResultCode) AS ResultCode, blank(ErrorType) AS ErrorType, try_cast(DurationMs AS BIGINT) AS DurationMs
+  FROM read_csv_auto('data/tools/*.csv', header = true, union_by_name = true, all_varchar = true);
 
 CREATE OR REPLACE VIEW retrieval AS
-  SELECT TimeGenerated, OperationId, SpanId, blank(ParentId) AS ParentId,
-         TopK, DocCount, blank(DocId) AS DocId, Score
-  FROM read_csv_auto('data/retrieval/*.csv', header = true, union_by_name = true);
+  SELECT try_cast(TimeGenerated AS TIMESTAMPTZ) AS TimeGenerated, OperationId, SpanId, blank(ParentId) AS ParentId,
+         try_cast(TopK AS BIGINT) AS TopK, try_cast(DocCount AS BIGINT) AS DocCount, blank(DocId) AS DocId,
+         try_cast(Score AS DOUBLE) AS Score
+  FROM read_csv_auto('data/retrieval/*.csv', header = true, union_by_name = true, all_varchar = true);
 
 CREATE OR REPLACE VIEW tool_schemas AS
-  SELECT AgentName, ToolName, Chars, DescChars
+  SELECT AgentName, ToolName, try_cast(Chars AS BIGINT) AS Chars, try_cast(DescChars AS BIGINT) AS DescChars
   FROM (SELECT *, row_number() OVER (PARTITION BY AgentName, ToolName ORDER BY CapturedAt DESC) AS rn
-        FROM read_csv_auto('data/tool_schemas/*.csv', header = true, union_by_name = true))
+        FROM read_csv_auto('data/tool_schemas/*.csv', header = true, union_by_name = true, all_varchar = true))
   WHERE rn = 1;
 
 -- content 요약. 원문은 없고 해시와 길이만 있다.
 -- ToolNames는 정의에 나온 순서다. 순서를 무시한 비교는 ToolNamesHash를 쓴다(A2 이름 집합 변형).
 CREATE OR REPLACE VIEW content AS
-  SELECT TimeGenerated, TraceId AS OperationId, SpanId, blank(AgentName) AS AgentName,
-         SysChars, blank(SysHash) AS SysHash, blank(SysHeadHash) AS SysHeadHash,
-         ToolDefsChars, blank(ToolDefsHash) AS ToolDefsHash,
-         ToolCount, blank(ToolNames) AS ToolNames,
+  SELECT try_cast(TimeGenerated AS TIMESTAMPTZ) AS TimeGenerated, TraceId AS OperationId, SpanId,
+         blank(AgentName) AS AgentName,
+         try_cast(SysChars AS BIGINT) AS SysChars, blank(SysHash) AS SysHash, blank(SysHeadHash) AS SysHeadHash,
+         try_cast(ToolDefsChars AS BIGINT) AS ToolDefsChars, blank(ToolDefsHash) AS ToolDefsHash,
+         try_cast(ToolCount AS BIGINT) AS ToolCount, blank(ToolNames) AS ToolNames,
          CASE WHEN blank(ToolNames) IS NULL THEN NULL
               ELSE md5(array_to_string(list_sort(string_split(CAST(ToolNames AS VARCHAR), '|')), '|')) END
            AS ToolNamesHash,
-         InChars, blank(InHash) AS InHash,
-         OutChars, blank(OutHash) AS OutHash,
-         ArgsChars, blank(ArgsHash) AS ArgsHash,
-         ResultChars, blank(ResultHash) AS ResultHash
-  FROM read_csv_auto('data/content_digest/*.csv', header = true, union_by_name = true);
+         try_cast(InChars AS BIGINT) AS InChars, blank(InHash) AS InHash,
+         try_cast(OutChars AS BIGINT) AS OutChars, blank(OutHash) AS OutHash,
+         try_cast(ArgsChars AS BIGINT) AS ArgsChars, blank(ArgsHash) AS ArgsHash,
+         try_cast(ResultChars AS BIGINT) AS ResultChars, blank(ResultHash) AS ResultHash
+  FROM read_csv_auto('data/content_digest/*.csv', header = true, union_by_name = true, all_varchar = true);
 
 -- 분석 단위 ----------------------------------------------------------------
 
@@ -235,6 +237,16 @@ CREATE OR REPLACE VIEW instrumentation AS
          count_if(MaxTok IS NOT NULL)  AS WithMaxTokens,
          count_if(OwnerAgent IS NOT NULL) AS WithAgentOwner
   FROM calls;
+
+-- 선택 데이터가 있는지. 0이면 그 데이터를 쓰는 지표는 "계측 부재" 또는 "미점검"이다.
+CREATE OR REPLACE VIEW data_presence AS
+  SELECT (SELECT count(*) FROM calls_raw)    AS CallRows,
+         (SELECT count(*) FROM agent_spans)  AS AgentSpanRows,
+         (SELECT count(*) FROM tools)        AS ToolRows,
+         (SELECT count(*) FROM retrieval)    AS RetrievalRows,
+         (SELECT count(*) FROM content)      AS ContentRows,
+         (SELECT count(*) FROM tool_schemas) AS ToolSchemaRows,
+         (SELECT count(*) FROM sub_agents)   AS SubAgentRows;
 
 -- 보고서 meta에 넣는 전체 수치.
 CREATE OR REPLACE VIEW overview AS
