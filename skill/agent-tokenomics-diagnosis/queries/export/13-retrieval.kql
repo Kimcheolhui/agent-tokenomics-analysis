@@ -1,0 +1,24 @@
+//! name: retrieval
+//! columns: TimeGenerated,OperationId,SpanId,ParentId,TopK,DocCount,DocId,Score
+//! sensitive: false
+// retrieval span을 반환 문서 단위로 펼친다. C3(검색 컨텍스트 과다)에 쓴다.
+// 문서가 0건인 span도 DocId가 빈 1행으로 남는다. 검색 횟수는 distinct SpanId로 센다.
+let T0 = datetime(2026-11-01);
+let T1 = datetime(2026-11-02);
+union AppDependencies, AppRequests
+| where TimeGenerated >= T0 and TimeGenerated < T1
+| where tostring(Properties["gen_ai.operation.name"]) == "retrieval"
+| extend TopK = toint(Properties["gen_ai.retrieval.top_k"]),
+         Docs = parse_json(tostring(Properties["gen_ai.retrieval.documents"]))
+| extend DocCount = coalesce(array_length(Docs), 0)
+| extend Docs = iff(DocCount > 0, Docs, dynamic([null]))
+| mv-expand Doc = Docs
+| project
+    TimeGenerated,
+    OperationId,
+    SpanId = Id,
+    ParentId,
+    TopK,
+    DocCount,
+    DocId  = tostring(Doc.id),
+    Score  = todouble(Doc.score)

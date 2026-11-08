@@ -1,0 +1,1732 @@
+<title>Agent 토큰 비용 진단 보고서</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans+KR:wght@400;500;600;700&display=swap">
+<style>
+/* Layout: 단일 보고서 컬럼(최대 68rem). 장 번호는 진단 순서(요약 → 증상 → 원인 → 범위)를 따르고, 카드는 원인 상세에만 쓴다. */
+:root {
+  --bg: #f2f3f5;
+  --surface: #fcfcfd;
+  --sunken: #e9ebef;
+  --ink: #14161b;
+  --ink-2: #4a4f59;
+  --muted: #747a85;
+  --line: #dde0e5;
+  --axis: #c2c6ce;
+  --accent: #1f62b8;
+  --c1: #2a78d6;
+  --c2: #eb6834;
+  --c3: #1baf7a;
+  --c4: #eda100;
+  --c5: #e87ba4;
+  --on-c4: #0b0b0b;
+  --v1-soft: #86b6ef;
+  --quiet: #b3b9c3;
+  --crit: #d03b3b;
+  --serious: #ec835a;
+  --warn: #fab219;
+  --good: #0ca30c;
+  --crit-tint: rgba(208, 59, 59, 0.10);
+  --serious-tint: rgba(236, 131, 90, 0.16);
+  --warn-tint: rgba(250, 178, 25, 0.16);
+  --good-tint: rgba(12, 163, 12, 0.09);
+  --nodata-tint: rgba(116, 122, 133, 0.13);
+  --tip-bg: #14161b;
+  --tip-ink: #f2f3f5;
+  --font-sans: "IBM Plex Sans KR", system-ui, -apple-system, "Apple SD Gothic Neo", "Malgun Gothic", sans-serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #0e1013; --surface: #16191d; --sunken: #22262c; --ink: #eceef2; --ink-2: #b6bbc5; --muted: #8a909a;
+    --line: #2a2e35; --axis: #3d424a; --accent: #6aa5ee;
+    --c1: #3987e5; --c2: #d95926; --c3: #199e70; --c4: #c98500; --c5: #d55181; --on-c4: #ffffff;
+    --v1-soft: #1c5cab; --quiet: #4b515b;
+    --crit-tint: rgba(208, 59, 59, 0.20); --serious-tint: rgba(236, 131, 90, 0.20); --warn-tint: rgba(250, 178, 25, 0.16);
+    --good-tint: rgba(12, 163, 12, 0.16); --nodata-tint: rgba(138, 144, 154, 0.16);
+    --tip-bg: #eceef2; --tip-ink: #14161b;
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #0e1013; --surface: #16191d; --sunken: #22262c; --ink: #eceef2; --ink-2: #b6bbc5; --muted: #8a909a;
+  --line: #2a2e35; --axis: #3d424a; --accent: #6aa5ee;
+  --c1: #3987e5; --c2: #d95926; --c3: #199e70; --c4: #c98500; --c5: #d55181; --on-c4: #ffffff;
+  --v1-soft: #1c5cab; --quiet: #4b515b;
+  --crit-tint: rgba(208, 59, 59, 0.20); --serious-tint: rgba(236, 131, 90, 0.20); --warn-tint: rgba(250, 178, 25, 0.16);
+  --good-tint: rgba(12, 163, 12, 0.16); --nodata-tint: rgba(138, 144, 154, 0.16);
+  --tip-bg: #eceef2; --tip-ink: #14161b;
+  color-scheme: dark;
+}
+
+*, *::before, *::after { box-sizing: border-box; }
+body {
+  background: var(--bg);
+  color: var(--ink);
+  font-family: var(--font-sans);
+  font-size: 15px;
+  line-height: 1.6;
+  padding-left: max(16px, env(safe-area-inset-left, 0px));
+  padding-right: max(16px, env(safe-area-inset-right, 0px));
+  -webkit-font-smoothing: antialiased;
+}
+body::before {
+  content: ""; position: fixed; inset: 0 0 auto; height: env(safe-area-inset-top, 0px); z-index: 10; background: var(--bg);
+}
+a { color: var(--accent); }
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+h1, h2, h3, h4 { text-wrap: balance; }
+.page { max-width: 68rem; margin: 0 auto; padding-block: 2rem 4rem; }
+
+/* 머리말 */
+.mast { display: grid; gap: 1rem; }
+.kicker { margin: 0; font-family: var(--font-mono); font-size: 0.75rem; letter-spacing: 0.08em; color: var(--muted); text-transform: uppercase; }
+.mast h1 { margin: 0; font-size: clamp(1.75rem, 4vw, 2.375rem); line-height: 1.2; font-weight: 700; letter-spacing: -0.015em; }
+.mast-sub { margin: -0.375rem 0 0; font-size: 1.0625rem; color: var(--ink-2); }
+.mast-meta { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 15rem), 1fr)); margin: 0.25rem 0 0; border-top: 1px solid var(--line); }
+.mast-meta div { padding: 0.625rem 1rem 0.625rem 0; border-bottom: 1px solid var(--line); min-width: 0; }
+.mast-meta dt { font-size: 0.75rem; color: var(--muted); }
+.mast-meta dd { margin: 0; font-size: 0.875rem; overflow-wrap: anywhere; }
+.sample { display: flex; gap: 0.5rem; align-items: flex-start; margin: 0; padding: 0.625rem 0.875rem; border-radius: 8px; background: var(--warn-tint); font-size: 0.8125rem; color: var(--ink); max-width: 60rem; }
+.sample .ico { color: var(--warn); margin-top: 0.3rem; }
+
+/* 고정 탐색 줄 */
+.bar {
+  position: sticky; top: env(safe-area-inset-top, 0px); z-index: 5;
+  display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 0.5rem 1rem;
+  margin-top: 1.5rem; padding-block: 0.5rem; background: var(--bg); border-bottom: 1px solid var(--line);
+}
+.bar-nav { display: flex; gap: 0.125rem; overflow-x: auto; min-width: 0; }
+.bar-nav a { font-size: 0.8125rem; color: var(--ink-2); text-decoration: none; padding: 0.375rem 0.625rem; border-radius: 6px; white-space: nowrap; }
+.bar-nav a:hover { background: var(--sunken); color: var(--ink); }
+.bar-nav .n { font-family: var(--font-mono); color: var(--muted); margin-right: 0.25rem; }
+.seg-ctl { display: inline-flex; flex: none; padding: 2px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface); }
+.seg-ctl button { font: inherit; font-size: 0.8125rem; border: 0; background: transparent; color: var(--ink-2); padding: 0.3rem 0.75rem; border-radius: 6px; cursor: pointer; }
+.seg-ctl button:hover { color: var(--ink); }
+.seg-ctl button[aria-pressed="true"] { background: var(--ink); color: var(--bg); }
+.seg-ctl .cnt { font-family: var(--font-mono); font-size: 0.75rem; opacity: 0.75; margin-left: 0.25rem; }
+
+/* 장 */
+.sec { display: grid; gap: 1.25rem; padding-top: 2.75rem; scroll-margin-top: 3.5rem; }
+.sec-h { display: flex; align-items: center; gap: 0.75rem; margin: 0; font-size: 1.5rem; font-weight: 700; letter-spacing: -0.01em; }
+.sec-no { font-family: var(--font-mono); font-size: 0.8125rem; font-weight: 500; color: var(--ink-2); border: 1px solid var(--axis); border-radius: 4px; padding: 0 0.4rem; line-height: 1.6; }
+.lede { margin: 0; max-width: 65ch; color: var(--ink-2); }
+.panel { background: var(--surface); border: 1px solid var(--line); border-radius: 12px; padding: 1.25rem 1.25rem 1rem; min-width: 0; }
+.small { font-size: 0.8125rem; color: var(--ink-2); margin: 0; }
+
+/* 요약 */
+.lead { list-style: none; margin: 0; padding: 0; display: grid; gap: 0.625rem; max-width: 64ch; }
+.lead li { position: relative; padding-left: 1.125rem; font-size: 1.0625rem; line-height: 1.6; }
+.lead li::before { content: ""; position: absolute; left: 0; top: 0.72em; width: 0.4rem; height: 0.4rem; border-radius: 1px; background: var(--ink); }
+.lead li:first-child { font-size: 1.1875rem; font-weight: 600; }
+.lead li:first-child::before { width: 0.5rem; height: 0.5rem; top: 0.66em; }
+.scope { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 9.5rem), 1fr)); margin: 0; border-block: 1px solid var(--line); }
+.scope div { padding: 0.75rem 1rem 0.75rem 0; min-width: 0; }
+.scope dt { font-size: 0.75rem; color: var(--muted); }
+.scope dd { margin: 0.125rem 0 0; font-size: 1.3125rem; font-weight: 600; letter-spacing: -0.01em; }
+.scope dd .u { font-size: 0.8125rem; font-weight: 500; color: var(--ink-2); margin-left: 0.125rem; }
+.prices { display: flex; flex-wrap: wrap; gap: 0.25rem 1.25rem; font-size: 0.75rem; color: var(--ink-2); margin: 0; }
+.prices code { font-family: var(--font-mono); font-size: 0.75rem; }
+
+/* 공통 칩·배지 */
+.ico { width: 12px; height: 12px; flex: none; display: inline-block; vertical-align: -1px; }
+.code { font-family: var(--font-mono); font-size: 0.75rem; font-weight: 500; padding: 0.0625rem 0.375rem; border-radius: 4px; background: var(--sunken); color: var(--ink); white-space: nowrap; }
+.code.big { font-size: 0.9375rem; padding: 0.1875rem 0.5rem; }
+.tag { font-size: 0.6875rem; font-weight: 600; color: var(--ink-2); border: 1px solid var(--axis); border-radius: 999px; padding: 0 0.4rem; white-space: nowrap; }
+.pill { display: inline-flex; align-items: center; gap: 0.3rem; padding: 0.125rem 0.55rem; border-radius: 999px; background: var(--vt); color: var(--ink); font-size: 0.75rem; font-weight: 600; white-space: nowrap; }
+.pill .ico, .cchip .ico, .mx-top .ico, .chip-st .ico { color: var(--vc); }
+.v-hit { --vc: var(--crit); --vt: var(--crit-tint); }
+.v-cand { --vc: var(--serious); --vt: var(--serious-tint); }
+.v-no { --vc: var(--good); --vt: var(--good-tint); }
+.v-nodata { --vc: var(--muted); --vt: var(--nodata-tint); }
+.v-hold { --vc: var(--warn); --vt: var(--warn-tint); }
+.v-skip { --vc: var(--muted); --vt: transparent; }
+.cchip { display: inline-flex; align-items: center; gap: 0.25rem; padding: 0.0625rem 0.4rem; border-radius: 4px; background: linear-gradient(var(--vt), var(--vt)), var(--sunken); font-family: var(--font-mono); font-size: 0.75rem; color: var(--ink); text-decoration: none; white-space: nowrap; }
+.cchip:hover { outline: 1px solid var(--axis); }
+.chips { display: flex; flex-wrap: wrap; gap: 0.25rem; }
+.legend { display: flex; flex-wrap: wrap; gap: 0.25rem 1rem; list-style: none; margin: 0; padding: 0; font-size: 0.75rem; color: var(--ink-2); }
+.legend li { display: inline-flex; align-items: center; gap: 0.375rem; }
+.sw { width: 10px; height: 10px; border-radius: 2px; display: inline-block; flex: none; }
+.sw.line { height: 2px; width: 14px; border-radius: 1px; }
+
+/* 색 역할 (div는 background, svg는 fill) */
+.t-v1, .c1 { background: var(--c1); fill: var(--c1); }
+.c2 { background: var(--c2); fill: var(--c2); }
+.c3 { background: var(--c3); fill: var(--c3); }
+.c4 { background: var(--c4); fill: var(--c4); }
+.c5 { background: var(--c5); fill: var(--c5); }
+.t-v1soft { background: var(--v1-soft); fill: var(--v1-soft); }
+.t-crit { background: var(--crit); fill: var(--crit); }
+.t-serious { background: var(--serious); fill: var(--serious); }
+.t-quiet { background: var(--quiet); fill: var(--quiet); }
+
+/* 그림 */
+.fig { margin: 0; min-width: 0; display: grid; gap: 0.625rem; align-content: start; }
+.fig-head h4 { margin: 0; font-size: 0.9375rem; font-weight: 600; line-height: 1.4; }
+.fig-sub { margin: 0.125rem 0 0; font-size: 0.75rem; color: var(--muted); overflow-wrap: anywhere; }
+.fig-body { min-width: 0; }
+.fig-note { margin: 0; font-size: 0.75rem; color: var(--ink-2); max-width: 70ch; }
+.fig-table summary { font-size: 0.75rem; color: var(--accent); cursor: pointer; width: max-content; }
+.fig-table[open] summary { margin-bottom: 0.5rem; }
+
+/* 가로 막대 (HTML) */
+.hb { container-type: inline-size; display: grid; --lw: 12rem; --vw: 7.5rem; }
+.hb-row { display: grid; grid-template-columns: minmax(0, var(--lw)) minmax(0, 1fr) var(--vw); column-gap: 0.875rem; align-items: center; }
+.hb-label { min-width: 0; display: flex; flex-wrap: wrap; align-items: center; gap: 0.25rem 0.375rem; font-size: 0.8125rem; line-height: 1.35; padding-block: 0.25rem; }
+.hb-label a { color: var(--ink); text-decoration: none; }
+.hb-label a:hover { text-decoration: underline; }
+.hb-scale { position: relative; height: 2.25rem; }
+.hb-tick { position: absolute; bottom: 0.125rem; transform: translateX(-50%); font-size: 0.6875rem; color: var(--muted); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.hb-tick.first { transform: none; }
+.hb-thr-label { position: absolute; top: 0; transform: translateX(-50%); font-size: 0.6875rem; font-weight: 600; color: var(--ink-2); white-space: nowrap; }
+.hb-thr-label.edge-r { transform: translateX(-100%); }
+.hb-thr-label.edge-l { transform: none; }
+.hb-track {
+  position: relative; min-height: 2rem; align-self: stretch; border-left: 1px solid var(--axis);
+  background-image: linear-gradient(to right, var(--line) 1px, transparent 1px);
+  background-size: var(--gs) 100%; background-repeat: repeat-x;
+}
+.hb-track[tabindex] { cursor: default; }
+.hb-track:hover .hb-bar, .hb-track:focus-visible .hb-bar { filter: brightness(1.1); }
+.hb-track:focus-visible { outline-offset: 0; }
+.hb-bar { position: absolute; left: 0; top: 50%; height: 14px; transform: translateY(-50%); border-radius: 0 4px 4px 0; min-width: 2px; }
+.hb-stack { position: absolute; left: 0; top: 50%; height: 14px; transform: translateY(-50%); display: flex; gap: 2px; }
+.hb-stack .seg { height: 100%; min-width: 2px; }
+.hb-stack .seg:last-child { border-radius: 0 4px 4px 0; }
+.hb-stack .seg:hover, .hb-stack .seg:focus-visible { filter: brightness(1.12); }
+.hb-thr { position: absolute; top: 0; bottom: 0; width: 0; border-left: 1.5px dashed var(--ink-2); pointer-events: none; }
+.hb-chip { position: absolute; left: 0.5rem; top: 50%; transform: translateY(-50%); display: inline-flex; align-items: center; gap: 0.3rem; font-size: 0.75rem; color: var(--ink-2); background: var(--vt); padding: 0.0625rem 0.5rem; border-radius: 999px; white-space: nowrap; max-width: calc(100% - 0.75rem); overflow: hidden; text-overflow: ellipsis; }
+.hb-chip .ico { color: var(--vc); }
+.hb-val { display: flex; flex-direction: column; line-height: 1.3; font-size: 0.8125rem; font-variant-numeric: tabular-nums; min-width: 0; }
+.hb-num { display: inline-flex; align-items: center; gap: 0.3rem; font-weight: 600; color: var(--ink); white-space: nowrap; }
+.hb-num .ico { color: var(--crit); width: 10px; height: 10px; }
+.hb-aside { font-size: 0.75rem; color: var(--muted); }
+.hb .legend { margin-bottom: 0.25rem; }
+@container (max-width: 34rem) {
+  .hb-row { grid-template-columns: minmax(0, 1fr) var(--vw); grid-template-areas: "label label" "track val"; }
+  .hb-label { grid-area: label; padding-top: 0.5rem; padding-bottom: 0; }
+  .hb-track, .hb-scale { grid-area: track; }
+  .hb-val { grid-area: val; }
+  .hb-axis { grid-template-areas: "track val"; }
+  .hb-axis .hb-label { display: none; }
+}
+
+/* 분할 막대 */
+.segbar { display: flex; gap: 2px; height: 28px; }
+.segpart { display: flex; align-items: center; padding-inline: 0.5rem; min-width: 0; border-radius: 4px; color: #ffffff; font-size: 0.75rem; font-weight: 600; font-variant-numeric: tabular-nums; }
+.segpart.c4 { color: var(--on-c4); }
+.segpart:hover, .segpart:focus-visible { filter: brightness(1.1); }
+.segpart span[hidden] { display: none; }
+.seg-total { margin: 0.5rem 0 0; font-size: 0.75rem; color: var(--ink-2); }
+
+/* SVG 그림 */
+.viz { display: block; overflow: visible; }
+.viz text { font-family: var(--font-sans); font-size: 11.5px; fill: var(--muted); font-variant-numeric: tabular-nums; }
+.viz .grid { stroke: var(--line); stroke-width: 1; }
+.viz .axis { stroke: var(--axis); stroke-width: 1; }
+.viz .hit { fill: transparent; }
+.viz .col { outline: none; }
+.viz .col:hover .mark, .viz .col:focus-visible .mark { opacity: 0.8; }
+.viz .col:focus-visible .hit { stroke: var(--accent); stroke-width: 1.5; }
+.viz .thr { stroke: var(--ink-2); stroke-width: 1.5; stroke-dasharray: 4 3; }
+.viz .stat { stroke: var(--muted); stroke-width: 1; }
+.viz .mlabel { fill: var(--ink-2); font-size: 11px; font-weight: 600; }
+.viz .cap { fill: var(--ink); font-weight: 600; font-size: 11.5px; }
+.viz .xtitle { fill: var(--muted); font-size: 11px; }
+.viz .line { fill: none; stroke: var(--c1); stroke-width: 2; stroke-linejoin: round; stroke-linecap: round; }
+.viz .area { fill: var(--c1); opacity: 0.1; }
+.viz .dot { fill: var(--c1); stroke: var(--surface); stroke-width: 2; }
+.viz .note { fill: var(--ink); font-size: 11.5px; font-weight: 500; }
+.viz .xhair { stroke: var(--ink-2); stroke-width: 1; }
+.viz .overlay { fill: transparent; outline: none; }
+.viz .overlay:focus-visible { stroke: var(--accent); stroke-width: 1.5; }
+.viz .whisk { stroke: var(--ink-2); stroke-width: 1.5; }
+.viz .med { stroke: var(--surface); stroke-width: 3; }
+.viz .blabel { fill: var(--ink); font-size: 12.5px; }
+
+/* 원문 증거 */
+.diff { display: grid; gap: 0.5rem; }
+.diff-meta { margin: 0; font-size: 0.8125rem; color: var(--ink-2); }
+.diff-lines { border: 1px solid var(--line); border-radius: 8px; overflow-x: auto; background: var(--bg); padding-block: 0.375rem; }
+.d-row { display: grid; grid-template-columns: 4.5rem max-content; font-family: var(--font-mono); font-size: 0.78rem; line-height: 1.75; }
+.d-gut { color: var(--muted); padding-inline: 0.75rem; font-size: 0.6875rem; user-select: none; white-space: nowrap; }
+.d-txt { white-space: pre; padding-right: 1rem; color: var(--ink); font-family: inherit; }
+.d-same .d-txt { color: var(--ink-2); }
+.d-a, .d-b { background: var(--serious-tint); }
+.d-row mark { background: var(--crit-tint); color: var(--ink); box-shadow: inset 0 -2px 0 var(--crit); border-radius: 2px; }
+.d-more .d-txt { font-family: var(--font-sans); color: var(--muted); font-size: 0.75rem; }
+.ldiff { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 15rem), 1fr)); gap: 1rem; }
+.ldiff h5 { margin: 0 0 0.375rem; font-size: 0.75rem; font-weight: 600; color: var(--ink-2); }
+.ldiff ol { margin: 0; padding: 0; list-style: none; border: 1px solid var(--line); border-radius: 8px; background: var(--bg); }
+.ldiff li { display: grid; grid-template-columns: 1.75rem minmax(0, 1fr) auto; gap: 0.5rem; padding: 0.3rem 0.625rem; font-family: var(--font-mono); font-size: 0.78rem; border-bottom: 1px solid var(--line); }
+.ldiff li:last-child { border-bottom: 0; }
+.ldiff li .i { color: var(--muted); }
+.ldiff li.moved { background: var(--serious-tint); }
+.ldiff li .mv { font-family: var(--font-sans); font-size: 0.6875rem; color: var(--ink-2); white-space: nowrap; }
+.pairs { display: grid; gap: 0.75rem; }
+.pair { display: grid; gap: 0.375rem; padding: 0.75rem; border: 1px solid var(--line); border-radius: 8px; background: var(--bg); }
+.msg { margin: 0; justify-self: start; max-width: 100%; padding: 0.375rem 0.75rem; border-radius: 10px 10px 10px 2px; background: var(--surface); border: 1px solid var(--line); font-size: 0.875rem; }
+.pair-gap { display: flex; align-items: center; gap: 0.5rem; font-size: 0.75rem; color: var(--ink-2); padding-left: 0.5rem; }
+.simbar { width: 4rem; height: 6px; border-radius: 3px; background: var(--sunken); position: relative; overflow: hidden; }
+.simbar i { position: absolute; inset: 0 auto 0 0; background: var(--crit); border-radius: 3px; }
+
+/* 표 */
+.tbl-wrap { overflow-x: auto; }
+table { border-collapse: collapse; width: 100%; font-size: 0.8125rem; }
+th { text-align: left; font-weight: 600; color: var(--ink-2); border-bottom: 1px solid var(--axis); padding: 0.5rem 0.625rem; white-space: nowrap; }
+td { border-bottom: 1px solid var(--line); padding: 0.5rem 0.625rem; vertical-align: top; }
+td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+tr:last-child td { border-bottom: 0; }
+.sym-table { min-width: 54rem; }
+.sym-table td:nth-child(2) { font-weight: 500; }
+.sym-table tr { scroll-margin-top: 4rem; }
+.sym-table tr:target td { background: var(--sunken); }
+.chip-st { display: inline-flex; align-items: center; gap: 0.3rem; white-space: nowrap; }
+.basis-table { min-width: 36rem; }
+
+/* 원인 카드 */
+.causes { display: grid; gap: 1.25rem; }
+.cat-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0.25rem 0.75rem; padding-top: 1rem; border-top: 1px solid var(--line); }
+.cat-head:first-child { border-top: 0; padding-top: 0; }
+.cat-head h3 { margin: 0; font-size: 1.125rem; }
+.cat-head p { margin: 0; font-size: 0.8125rem; color: var(--muted); }
+.cause { background: var(--surface); border: 1px solid var(--line); border-radius: 12px; padding: 1.25rem 1.375rem 1.375rem; display: grid; gap: 1rem; min-width: 0; scroll-margin-top: 4.5rem; transition: box-shadow 0.4s; }
+.cause:focus { outline: none; }
+.cause.flash { box-shadow: 0 0 0 2px var(--accent); }
+.cause-head { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: flex-start; gap: 0.75rem 1.5rem; }
+.cause-title { display: flex; gap: 0.75rem; align-items: flex-start; min-width: 0; flex: 1 1 18rem; }
+.cause-cat { margin: 0; font-size: 0.75rem; color: var(--muted); }
+.cause h3 { margin: 0.0625rem 0 0; font-size: 1.1875rem; font-weight: 600; line-height: 1.35; }
+.cause-status { display: flex; flex-direction: column; align-items: flex-end; gap: 0.375rem; }
+.cause-waste { margin: 0; display: flex; align-items: baseline; flex-wrap: wrap; justify-content: flex-end; gap: 0.25rem 0.5rem; }
+.cause-waste .lbl { font-size: 0.75rem; color: var(--muted); }
+.cause-waste strong { font-size: 1.5rem; font-weight: 700; letter-spacing: -0.01em; }
+.cause-waste .share { font-size: 0.75rem; color: var(--ink-2); }
+.cause-from { margin: 0; display: flex; flex-wrap: wrap; align-items: center; gap: 0.375rem; font-size: 0.75rem; }
+.cause-from .lbl { color: var(--muted); margin-right: 0.125rem; }
+.schip { padding: 0.0625rem 0.5rem; border-radius: 999px; border: 1px solid var(--line); color: var(--ink-2); text-decoration: none; }
+.schip:hover { border-color: var(--axis); color: var(--ink); }
+.finding { margin: 0; max-width: 68ch; }
+.finding.example { color: var(--ink-2); font-size: 0.875rem; }
+.rule { margin: 0; font-size: 0.8125rem; color: var(--ink-2); max-width: 68ch; }
+.rule b { font-weight: 600; color: var(--ink); }
+.figs { display: grid; gap: 1.75rem 2rem; grid-template-columns: repeat(auto-fit, minmax(min(100%, 25rem), 1fr)); }
+.fig.wide { grid-column: 1 / -1; }
+.cause-foot { display: grid; gap: 1rem 2rem; grid-template-columns: repeat(auto-fit, minmax(min(100%, 22rem), 1fr)); border-top: 1px solid var(--line); padding-top: 1rem; }
+.cause-foot h4 { margin: 0 0 0.375rem; font-size: 0.75rem; font-weight: 600; color: var(--muted); letter-spacing: 0.02em; }
+.formula { display: block; font-family: var(--font-mono); font-size: 0.78rem; line-height: 1.6; color: var(--ink); overflow-wrap: anywhere; }
+.inputs { margin: 0.375rem 0 0; font-size: 0.8125rem; color: var(--ink-2); }
+.cause-foot ul { margin: 0; padding-left: 1.125rem; font-size: 0.8125rem; color: var(--ink-2); display: grid; gap: 0.25rem; }
+.cause.example { background: linear-gradient(var(--surface), var(--surface)); border-style: dashed; }
+
+/* 점검 범위 */
+.mx { display: grid; gap: 0.875rem; }
+.mx-row { display: grid; grid-template-columns: 11rem minmax(0, 1fr); gap: 0.75rem; align-items: start; }
+.mx-cat { display: flex; align-items: center; gap: 0.5rem; font-size: 0.8125rem; font-weight: 600; padding-top: 0.5rem; }
+.mx-cells { display: grid; grid-template-columns: repeat(auto-fill, minmax(9.25rem, 1fr)); gap: 0.5rem; }
+.mx-cell { display: grid; gap: 0.25rem; align-content: start; padding: 0.5rem 0.625rem; min-height: 5rem; border-radius: 8px; border: 1px solid var(--line); background: linear-gradient(var(--vt), var(--vt)), var(--surface); color: var(--ink); text-decoration: none; }
+.mx-cell.v-skip { background: transparent; }
+.mx-cell:hover { border-color: var(--axis); }
+.mx-top { display: flex; justify-content: space-between; align-items: center; }
+.mx-name { font-size: 0.8125rem; line-height: 1.3; }
+.mx-v { font-size: 0.6875rem; color: var(--ink-2); }
+.counts { display: flex; flex-wrap: wrap; gap: 0.375rem 0.75rem; list-style: none; margin: 0; padding: 0; font-size: 0.8125rem; }
+.counts li { display: inline-flex; align-items: center; gap: 0.3rem; }
+.counts .ico { color: var(--vc); }
+.counts b { font-variant-numeric: tabular-nums; }
+@media (max-width: 640px) {
+  .mx-row { grid-template-columns: 1fr; }
+  .cause-status { align-items: flex-start; }
+  .cause-waste { justify-content: flex-start; }
+  .cause { padding: 1rem; }
+  .panel { padding: 1rem 0.875rem 0.875rem; }
+}
+
+/* 사용법 */
+.howto { border-top: 1px solid var(--line); margin-top: 3rem; padding-top: 1.25rem; }
+.howto summary { font-weight: 600; cursor: pointer; }
+.howto-body { display: grid; gap: 0.75rem; margin-top: 0.75rem; font-size: 0.875rem; max-width: 70ch; }
+.howto-body p, .howto-body ul { margin: 0; }
+.howto-body code { font-family: var(--font-mono); font-size: 0.8rem; background: var(--sunken); padding: 0 0.25rem; border-radius: 3px; }
+
+/* 툴팁 */
+#tip { position: fixed; z-index: 50; pointer-events: none; max-width: 17rem; padding: 0.45rem 0.625rem; border-radius: 6px; background: var(--tip-bg); color: var(--tip-ink); font-size: 0.75rem; line-height: 1.45; display: grid; gap: 0.0625rem; box-shadow: 0 4px 16px rgba(0, 0, 0, 0.18); }
+#tip strong { font-size: 0.875rem; font-weight: 600; font-variant-numeric: tabular-nums; }
+#tip span { opacity: 0.85; }
+
+@media (prefers-reduced-motion: reduce) {
+  .cause { transition: none; }
+  html { scroll-behavior: auto; }
+}
+</style>
+
+<div class="page">
+  <header class="mast" id="top"></header>
+  <nav class="bar" aria-label="보고서 탐색">
+    <div class="bar-nav">
+      <a href="#sec-summary"><span class="n">1</span>요약</a>
+      <a href="#sec-symptoms"><span class="n">2</span>증상 점검</a>
+      <a href="#sec-causes"><span class="n">3</span>원인 상세</a>
+      <a href="#sec-scope"><span class="n">4</span>점검 범위</a>
+    </div>
+    <div class="seg-ctl" role="group" aria-label="원인 상세 보기 방식">
+      <button type="button" id="mode-report" aria-pressed="true">보고서</button>
+      <button type="button" id="mode-catalog" aria-pressed="false">그림 카탈로그<span class="cnt">25</span></button>
+    </div>
+  </nav>
+  <main id="report"></main>
+</div>
+<div id="tip" role="tooltip" hidden></div>
+
+<script>
+'use strict';
+/* =====================================================================
+   REPORT: 이 객체만 채우면 보고서 전체가 다시 그려진다.
+   아래 값은 예시 데이터이며 실제 고객 수치가 아니다.
+   ===================================================================== */
+const REPORT = {
+  meta: {
+    sample: true,
+    title: '토큰 비용 진단 보고서',
+    customer: '예시 고객사',
+    service: '고객 상담 Agent',
+    period: { from: '2026-10-20', to: '2026-11-02', days: 14 },
+    agents: ['support-router', 'order-agent', 'refund-agent'],
+    project: 'proj-cs-prod',
+    appInsights: 'appi-cs-prod (workspace: law-cs-prod)',
+    models: 'gpt-5.4 (Global Standard), gpt-5-mini',
+    sources: 'AppDependencies, AppRequests, AppGenAIContent(10% 샘플)',
+    author: '홍길동 · Cloud Solution Architect',
+    date: '2026-11-08',
+    totalCost: 3280,
+    turns: 18420,
+    calls: 96310,
+    cacheRate: 0.42,
+    fixedInput: 9840,
+    peff: 1.244,
+    prices: [
+      { model: 'gpt-5.4', pin: 2.00, pcache: 0.20, pout: 8.00 },
+      { model: 'gpt-5-mini', pin: 0.40, pcache: 0.04, pout: 1.60 },
+    ],
+    summary: [
+      '분석 기간 14일의 LLM 비용은 $3,280이다. 낭비 추정이 가장 큰 원인은 호출마다 바뀌는 System prompt(A1, $590)와 단순 단계의 상위 모델 사용(E1, $459)이다.',
+      'System prompt 첫 줄의 현재 시각 값이 호출마다 바뀌어, 고정 Input 9,840 토큰이 대부분 캐시 단가로 과금되지 못한다.',
+      'lookup_order와 search_faq가 결과 원문을 그대로 넘겨, 턴 안에서 Input이 첫 호출의 2.6배로 불어난다(C2).',
+      '대화 ID(gen_ai.conversation.id)가 기록되지 않아 대화가 길어질 때의 영향(C1)은 진단하지 못했다.',
+    ],
+  },
+
+  categories: {
+    A: { name: 'Prefix 변동', term: '캐시 히트 C_i 감소 → 비캐시 Input 증가' },
+    B: { name: '고정 Input 비대', term: '고정 Input S' },
+    C: { name: '컨텍스트 누적', term: '이력 H_i, Tool 결과·검색 컨텍스트 T_i' },
+    D: { name: '호출 구조', term: '턴당 LLM 호출 수 N' },
+    E: { name: '모델·출력 설정', term: '단가 P, Output O_i' },
+    F: { name: '실패로 인한 낭비', term: '결과 없이 끝난 호출·턴 전체' },
+  },
+
+  /* 증상: status = abnormal | normal | nodata | hold
+     수치 기준이 있으면 value, threshold, dir(higher: 클수록 나쁨 | lower: 작을수록 나쁨) */
+  symptoms: [
+    { id: 'S1', name: '캐시 달성률이 낮다', metric: '캐시 달성률 (A 공통)', value: 0.48, fmt: 'ratio', threshold: 0.70, dir: 'lower', status: 'abnormal', causes: ['A1', 'A2', 'A3', 'A4', 'A5', 'A6'] },
+    { id: 'S2', name: '턴 첫 호출의 캐시 미스가 잦다', metric: '보존 시간 내 첫 호출 미스율 (A1)', value: 0.38, fmt: 'ratio', threshold: 0.20, dir: 'higher', status: 'abnormal', causes: ['A1', 'A2', 'A4', 'A5', 'A6'] },
+    { id: 'S3', name: '턴 중간에 캐시율이 떨어진다', metric: '두 번째 이후 호출의 캐시 달성률', value: 0.81, fmt: 'ratio', threshold: 0.70, dir: 'lower', status: 'normal', causes: ['A3', 'A2'] },
+    { id: 'S4', name: '고정 Input의 비용 비중이 크다', metric: '고정 Input 비용 비중 (B 공통)', value: 0.36, fmt: 'ratio', threshold: 0.30, dir: 'higher', status: 'abnormal', causes: ['B1', 'B2', 'B3', 'B4'] },
+    { id: 'S5', name: '턴 안에서 Input이 가파르게 늘어난다', metric: '턴 내 Input 증가 배수 p50 (C2)', value: 2.6, fmt: 'x', threshold: 2.0, dir: 'higher', status: 'abnormal', causes: ['C2', 'C3', 'D1'] },
+    { id: 'S6', name: '대화가 길어질수록 Input이 늘어난다', metric: '턴 간 Input 증가 배수 (C1)', value: null, fmt: 'x', threshold: 2.0, dir: 'higher', status: 'nodata', note: 'gen_ai.conversation.id 미기록', causes: ['C1'] },
+    { id: 'S7', name: '턴당 호출 수의 꼬리가 길다', metric: '꼬리 턴 비용 비중 (D1)', value: 0.11, fmt: 'ratio', threshold: 0.15, dir: 'higher', status: 'normal', causes: ['D1', 'D2', 'F1', 'F2'] },
+    { id: 'S8', name: '하위 에이전트의 첫 호출 Input이 크다', metric: '위임 시 Input 전달 비율 (D4)', value: 0.46, fmt: 'ratio', threshold: 0.80, dir: 'higher', status: 'normal', causes: ['D4', 'B4'] },
+    { id: 'S9', name: '단순 단계에도 Reasoning이 많다', metric: '호출 유형별 Reasoning 수준·토큰 (E2)', value: null, display: '유형 1–3도 high · ReasonTok p50 1,140', thresholdText: '수치 기준 없음 · 단계 비교', status: 'abnormal', causes: ['E2', 'E1'] },
+    { id: 'S10', name: '최종 응답 Output이 길다', metric: '목표 길이 대비 최종 응답 길이 (E3)', value: null, display: '최종 응답 p95 1,440 tok', thresholdText: '목표 길이 미정', status: 'hold', causes: ['E3'] },
+    { id: 'S11', name: '상위 모델의 비용 비중이 크다', metric: '상위 모델 잠재 절감 비중 (E1)', value: 0.14, fmt: 'ratio', threshold: 0.10, dir: 'higher', status: 'abnormal', causes: ['E1', 'D3'] },
+    { id: 'S12', name: '결과 없이 끝난 호출·턴의 비용이 크다', metric: '늦은 실패 계수 (F4)', value: 1.2, fmt: 'x', threshold: 1.5, dir: 'higher', status: 'normal', causes: ['F1', 'F2', 'F3', 'F4', 'E4'] },
+  ],
+
+  /* 원인: verdict = 해당 | 후보 | 비해당 | 계측 부재 | 판정 보류 | 미점검
+     해당·후보이면서 waste가 있으면 3장 카드로 나온다. charts는 그림 카탈로그에서 항상 보인다. */
+  causes: [
+    {
+      id: 'A1', name: 'Prefix 앞부분의 동적 값', verdict: '해당', from: ['S1', 'S2'],
+      rule: '보존 시간 내 첫 호출 미스율 ≥ 0.2이고 System prompt 변형 비율 ≥ 0.1',
+      finding: 'System prompt 첫 줄의 "현재 시각" 값이 호출마다 바뀐다. 보존 시간 안에 들어온 턴 첫 호출의 38%가 캐시를 쓰지 못했고, 프레임워크가 호출마다 템플릿을 다시 렌더링해 턴 안의 호출도 같은 이유로 미스 난다.',
+      waste: { usd: 590, formula: 'Σ(미스 호출) Cacheable(캐시 가능 토큰) × (P_in − P_cache)', inputs: '(턴 첫 호출 7,000회 × 9,728 + 턴 안 재렌더링 22,600회 × 11,500) tok × $1.80/1M' },
+      differential: [
+        'A5 캐시 만료: 직전 첫 호출과 5분 안에 들어온 호출만 골랐으므로 만료로 설명되지 않는다.',
+        'A2 Tool 정의 변동: ToolDefinitions 원문 변형이 1종이다.',
+        'A6 쏠림: 분당 15건 이하 구간에서도 미스율이 같다.',
+      ],
+      charts: [
+        {
+          type: 'diff', wide: true, title: 'System prompt 변형 두 건의 첫 차이',
+          sub: 'AppGenAIContent.SystemInstructions · 같은 턴의 연속 호출',
+          meta: '첫 차이는 41번째 토큰에 있고, 그 뒤 9,690 토큰이 캐시 밖으로 밀려난다.',
+          aTag: '호출 1', bTag: '호출 2',
+          lines: [
+            { same: '# 역할' },
+            { same: '너는 예시 고객사의 주문·환불 상담 에이전트다.' },
+            { a: '현재 시각: 2026-10-27 10:02:11 KST', b: '현재 시각: 2026-10-27 10:02:16 KST' },
+            { same: '# 응대 규칙' },
+            { same: '1. 주문번호를 먼저 확인한다. 주문번호가 없으면 …' },
+            { more: '이하 System prompt 5,800 토큰과 Tool 정의 3,860 토큰은 동일' },
+          ],
+        },
+        {
+          type: 'hbar', title: '에이전트별 보존 시간 내 첫 호출 미스율',
+          sub: '쿼리: 보존 시간 내 첫 호출 미스율 (A1) · WindowMin 5분, RpmLimit 15',
+          fmt: 'pct', max: 0.5, threshold: { value: 0.2, dir: 'above', label: '기준 0.2' },
+          rows: [
+            { label: 'support-router', value: 0.41, aside: '첫 호출 12,880회' },
+            { label: 'order-agent', value: 0.36, aside: '첫 호출 4,210회' },
+            { label: 'refund-agent', value: 0.33, aside: '첫 호출 1,330회' },
+          ],
+        },
+      ],
+    },
+    {
+      id: 'A2', name: 'Tool 정의 변동', verdict: '비해당', from: ['S1', 'S2'],
+      rule: '원문 변형 수가 이름 집합 변형 수보다 크거나, 이름 집합 변형이 2종 이상',
+      basis: 'ToolDefinitions 원문 변형 1종, 이름 집합 변형 1종',
+      charts: [
+        {
+          type: 'listdiff', title: 'Tool 정의 순서 변형 두 건',
+          sub: 'AppGenAIContent.ToolDefinitions · 이름 집합은 같고 순서만 다름',
+          aTag: '변형 1 · 61% 턴', bTag: '변형 2 · 39% 턴',
+          a: ['lookup_order', 'search_faq', 'get_refund_policy', 'create_ticket', 'escalate_to_human'],
+          b: ['search_faq', 'lookup_order', 'get_refund_policy', 'create_ticket', 'escalate_to_human'],
+          note: '순서가 바뀐 tool(강조)부터 뒤가 모두 다른 prefix가 된다.',
+        },
+      ],
+    },
+    {
+      id: 'A3', name: '이력 앞부분 편집', verdict: '비해당', from: ['S1', 'S3'],
+      rule: '축소 이벤트가 있고 축소 직후 캐시율이 평상시보다 크게 낮음',
+      basis: '같은 대화 안 Input 축소 이벤트 0건',
+      charts: [
+        {
+          type: 'columns', wide: true, title: '대화 안 호출별 Input 구성',
+          sub: '같은 대화의 호출 순번별 CacheTok과 비캐시 Input (InTok − CacheTok)',
+          fmt: 'tok', xLabel: '대화 안 LLM 호출 순번', xName: '호출',
+          series: [{ name: '캐시 히트' }, { name: '비캐시 Input' }],
+          bins: [
+            { label: '1', segs: [9728, 1100] }, { label: '2', segs: [10752, 2400] }, { label: '3', segs: [13056, 3100] },
+            { label: '4', segs: [16000, 3600] }, { label: '5', segs: [19584, 4200] }, { label: '6', segs: [9728, 5600] },
+            { label: '7', segs: [15232, 1300] }, { label: '8', segs: [16384, 2100] },
+          ],
+          markers: [{ at: 5, label: '축소 이벤트', kind: 'thr' }],
+          note: '6번째 호출에서 이력을 요약해 Input이 줄었지만, 캐시 히트가 System prompt 길이(9,728)로 떨어졌다.',
+        },
+      ],
+    },
+    {
+      id: 'A4', name: 'Prefix가 최소 캐시 길이 미만', verdict: '비해당', from: ['S1', 'S2'],
+      rule: 'S_a < MinTok이고 턴 첫 호출 CacheTok이 항상 0',
+      basis: 'refund-agent만 S_a 860 < MinTok 1,024 · 호출 비중 1.8%',
+      charts: [
+        {
+          type: 'hbar', title: '에이전트별 고정 Input(S_a)과 최소 캐시 길이',
+          sub: 'B 공통 측정법 1 (실험 호출) · MinTok = 모델별 캐시 파라미터',
+          fmt: 'tok', threshold: { value: 1024, dir: 'below', label: 'MinTok 1,024' },
+          rows: [
+            { label: 'support-router', value: 9840 },
+            { label: 'order-agent', value: 2610 },
+            { label: 'refund-agent', value: 860, aside: '호출 비중 1.8%' },
+          ],
+        },
+      ],
+    },
+    {
+      id: 'A5', name: '캐시 만료', verdict: '후보', from: ['S1', 'S2'],
+      rule: '보존 시간 안 구간 히트율은 높고 밖 구간에서 급락',
+      finding: '직전 첫 호출과의 간격이 보존 시간(5분)을 넘으면 히트율이 62%에서 31% 이하로 떨어진다. 야간 저트래픽 시간대에 몰려 있어 영향은 작다.',
+      waste: { usd: 13, formula: 'Σ(보존 시간 밖 첫 호출) Cacheable(S_a) × (P_in − P_cache) × (안쪽 히트율 − 구간 히트율)', inputs: '1,150회 × 0.31 + 520회 × 0.52 + 180회 × 0.56, 각 9,728 tok × $1.80/1M' },
+      differential: ['A1이 함께 있어 "보존 시간 안" 히트율 자체가 62%로 낮다. A1을 고치면 이 항목의 낭비 추정이 커질 수 있다.'],
+      charts: [
+        {
+          type: 'columns', title: '요청 간격 구간별 첫 호출 히트율',
+          sub: '쿼리: 요청 간격별 첫 호출 히트율 (A5) · WindowMin 5분',
+          fmt: 'pct', yMax: 1, capLabels: true, xName: '간격',
+          bins: [
+            { label: '보존 시간 안\n<5분', value: 0.62, n: '14,200회' },
+            { label: '1–2배\n5–10분', value: 0.31, n: '1,150회', tone: 'crit' },
+            { label: '2–6배\n10–30분', value: 0.10, n: '520회', tone: 'crit' },
+            { label: '6배 이상\n≥30분', value: 0.06, n: '180회', tone: 'crit' },
+          ],
+          note: '빨간 막대는 보존 시간 밖 구간이다.',
+        },
+      ],
+    },
+    {
+      id: 'A6', name: '트래픽 분산·쏠림', verdict: '비해당', from: ['S1', 'S2'],
+      rule: '엔드포인트별 히트율 차이, 또는 RpmLimit 초과 구간의 히트율 하락',
+      basis: '단일 엔드포인트 · 분당 15건 초과 구간 히트율 차이 2%p',
+      charts: [
+        {
+          type: 'columns', title: '분당 요청 수 구간별 히트율',
+          sub: '쿼리: 분당 요청 수 구간별 히트율 (A6) · RpmLimit 15',
+          fmt: 'pct', yMax: 1, capLabels: true, xName: '구간',
+          bins: [
+            { label: '≤15/분\n기준 이하', value: 0.63 },
+            { label: '16–30/분\n1–2배', value: 0.49, tone: 'crit' },
+            { label: '>30/분\n2배 초과', value: 0.34, tone: 'crit' },
+          ],
+        },
+        {
+          type: 'hbar', title: '엔드포인트별 히트율',
+          sub: '쿼리: 엔드포인트별 히트율 (A6) · server.address',
+          fmt: 'pct', max: 1,
+          rows: [
+            { label: 'aoai-cs-krc', value: 0.62, aside: '호출 82%' },
+            { label: 'aoai-cs-jpe', value: 0.21, aside: '호출 18%' },
+          ],
+        },
+      ],
+    },
+    {
+      id: 'B1', name: '미사용 Tool 상시 전송', verdict: '해당', from: ['S4'],
+      rule: '2주간 사용률 1% 미만이고 정의 토큰이 큰 tool',
+      finding: '정의된 tool 10개 중 5개가 2주 동안 1% 미만의 턴에서만 쓰였고, 이 정의 1,100 토큰이 모든 LLM 호출에 실린다. escalate_to_human은 사용률이 낮지만 에스컬레이션 경로라 제외했다.',
+      waste: { usd: 132, formula: 'Σ(미사용 tool) 정의 토큰 × 에이전트 LLM 호출 수 × P_eff', inputs: '1,100 tok × 96,310회 × P_eff $1.244/1M' },
+      differential: ['get_refund_policy는 자주 쓰이지만 정의가 길어 B2에서 따로 다룬다.'],
+      charts: [
+        {
+          type: 'hbar', wide: true, title: 'Tool별 정의 토큰과 사용률',
+          sub: 'AppGenAIContent.ToolDefinitions + execute_tool span · 사용률 = 호출된 턴 ÷ 전체 턴',
+          fmt: 'tok', labelWidth: '11rem',
+          legend: [{ tone: 't-crit', label: '사용률 1% 미만' }, { tone: 't-v1', label: '사용 중' }, { tone: 't-quiet', label: '사용률은 낮지만 필요한 tool' }],
+          rows: [
+            { label: 'get_refund_policy', value: 1420, aside: '사용 18.4%' },
+            { label: 'lookup_order', value: 410, aside: '사용 62.1%' },
+            { label: 'create_ticket', value: 380, aside: '사용 9.2%' },
+            { label: 'update_address', value: 340, aside: '사용 0.6%', tone: 'crit' },
+            { label: 'search_faq', value: 290, aside: '사용 41%' },
+            { label: 'escalate_to_human', value: 260, aside: '사용 0.4%', tone: 'quiet', tag: '필요' },
+            { label: 'check_inventory', value: 220, aside: '사용 0%', tone: 'crit' },
+            { label: 'legacy_crm_lookup', value: 200, aside: '사용 0%', tone: 'crit' },
+            { label: 'get_invoice_pdf', value: 180, aside: '사용 0%', tone: 'crit' },
+            { label: 'apply_coupon', value: 160, aside: '사용 0.2%', tone: 'crit' },
+          ],
+        },
+      ],
+    },
+    {
+      id: 'B2', name: '장황한 Tool schema', verdict: '후보', from: ['S4'],
+      rule: '정의 크기 ≥ 같은 에이전트 중앙값 × 3, 리뷰에서 긴 enum·반복 설명 확인',
+      finding: 'get_refund_policy 정의가 1,420 토큰으로 tool 정의 중앙값(275)의 5배다. 대부분이 환불 사유 enum 64개와 사유별 설명이다.',
+      waste: { usd: 84, formula: '축약 가능 토큰 × 에이전트 LLM 호출 수 × P_eff', inputs: '700 tok × 96,310회 × P_eff $1.244/1M' },
+      differential: [],
+      charts: [
+        {
+          type: 'hbar', title: 'Tool별 정의 토큰',
+          sub: '쿼리: Tool별 정의 크기 (B2) · 기준선 = 중앙값 × 3',
+          fmt: 'tok', labelWidth: '11rem', threshold: { value: 825, dir: 'above', label: '중앙값 × 3 = 825' },
+          rows: [
+            { label: 'get_refund_policy', value: 1420, aside: 'enum 64개' },
+            { label: 'lookup_order', value: 410 }, { label: 'create_ticket', value: 380 },
+            { label: 'update_address', value: 340 }, { label: 'search_faq', value: 290 },
+            { label: 'escalate_to_human', value: 260 }, { label: 'check_inventory', value: 220 },
+            { label: 'legacy_crm_lookup', value: 200 }, { label: 'get_invoice_pdf', value: 180 },
+            { label: 'apply_coupon', value: 160 },
+          ],
+        },
+      ],
+    },
+    {
+      id: 'B3', name: 'System prompt 비대', verdict: '후보', from: ['S4'],
+      rule: '고정 Input 비용 비중 ≥ 0.3이고, 리뷰에서 예시·참조 데이터·중복 규칙 비중이 큼',
+      finding: 'System prompt 5,980 토큰 중 few-shot 예시(2,140)와 환불 정책 전문(1,480)이 61%를 차지한다. 정책 전문은 get_refund_policy 결과와 내용이 겹친다.',
+      waste: { usd: 110, formula: '축약 가능 토큰 × 에이전트 LLM 호출 수 × P_eff', inputs: '920 tok × 96,310회 × P_eff $1.244/1M (예시 3개 중 2개 축약, 정책 전문 중복 구간 제거)' },
+      differential: ['P_eff는 현재 캐시율 42%를 반영한 값이다. A1을 고쳐 캐시율이 오르면 이 항목의 낭비 추정도 함께 줄어든다.'],
+      charts: [
+        {
+          type: 'segbar', wide: true, title: 'System prompt 구성 (5,980 토큰)',
+          sub: 'SystemInstructions를 o200k_base로 토큰화 · 구성 분류는 리뷰',
+          fmt: 'tok',
+          parts: [
+            { name: '페르소나·말투', value: 380 },
+            { name: '응대 규칙', value: 1720 },
+            { name: 'few-shot 예시', value: 2140 },
+            { name: '참조 데이터 (환불 정책 전문)', value: 1480 },
+            { name: '출력 형식', value: 260 },
+          ],
+        },
+      ],
+    },
+    {
+      id: 'B4', name: '하위 에이전트 prompt 중복', verdict: '비해당', from: ['S4', 'S8'],
+      rule: '하위 에이전트 S_a가 상위와 비슷하거나 공통 블록이 반복되고, tool 사용률이 낮음',
+      basis: '공통 블록이 하위 에이전트에서 640 토큰 이하',
+      charts: [
+        {
+          type: 'stackbar', title: '에이전트별 고정 Input 구성',
+          sub: '쿼리: 에이전트별 고정 Input 크기 (B4) · 공통 블록은 리뷰로 분류',
+          fmt: 'tok', series: [{ name: '공통 블록' }, { name: '고유 부분' }],
+          rows: [
+            { label: 'support-router', segs: [2400, 7440] },
+            { label: 'order-agent', segs: [2400, 210] },
+            { label: 'refund-agent', segs: [640, 220] },
+          ],
+        },
+      ],
+    },
+    {
+      id: 'C1', name: '대화 이력 무제한 누적', verdict: '계측 부재', from: ['S6'],
+      rule: '턴 간 Input 증가 배수 ≥ 2',
+      basis: 'gen_ai.conversation.id 미기록 → 앱에서 span 속성으로 추가 필요',
+      charts: [
+        {
+          type: 'line', wide: true, title: '턴 순번별 첫 호출 Input',
+          sub: '쿼리: 턴 순번별 첫 호출 Input (C1) · 턴 순번별 InTok p50',
+          fmt: 'tok', xLabel: '대화 안 턴 순번', xName: '턴',
+          points: [10200, 11900, 13400, 15100, 16800, 18300, 20100, 21600, 23400, 24900, 26700, 28300].map((y, i) => ({ x: String(i + 1), y })),
+          threshold: { value: 20400, label: '1턴의 2배' },
+          vmarkers: [{ i: 7, label: 'p90 대화 길이 8턴' }],
+          endLabel: true,
+          note: 'p90 대화 길이(8턴)에서 첫 호출 Input이 1턴의 2.1배다. 꺾이는 지점 없이 오르면 이력에 상한이 없다.',
+        },
+      ],
+    },
+    {
+      id: 'C2', name: 'Tool 결과 원문 전달', verdict: '해당', from: ['S5'],
+      rule: '턴 내 증가 배수 p50 ≥ 2, 호출당 증가율 p95 ≥ 0.5, 샘플에서 결과 일부만 사용',
+      finding: 'lookup_order와 search_faq가 원문 JSON 전체(p95 8천 토큰대)를 돌려주고, 이 결과가 턴이 끝날 때까지 매 호출에 다시 실린다. 샘플 40턴에서 응답에 실제로 쓰인 부분은 결과의 18%였다.',
+      waste: { usd: 174, formula: 'Σ(tool 결과) (결과 토큰 − 필요 토큰) × 이후 남은 호출 수 × P_eff', inputs: '불필요 결과 41.2M tok × 재전송 3.4회 × P_eff $1.244/1M' },
+      differential: [
+        'C3 검색 컨텍스트: 큰 증가분 사이에 execute_tool span이 있고 retrieval span은 없다.',
+        'D1 루프: 호출당 증가율 p95가 0.78로 높아 작은 증가가 쌓인 경우와 다르다.',
+        'D4 하위 에이전트 응답: 증가분이 하위 invoke_agent 직후에 생기지 않는다.',
+      ],
+      charts: [
+        {
+          type: 'line', title: '대표 턴의 호출별 Input',
+          sub: '턴 내 Input 증가 배수 p50 부근 턴 · OperationId 예시',
+          fmt: 'tok', xLabel: '턴 안 LLM 호출 순번', xName: '호출',
+          points: [10240, 10610, 18920, 19350, 27880, 28300, 28760].map((y, i) => ({ x: String(i + 1), y })),
+          threshold: { value: 20480, label: '첫 호출의 2배' },
+          annotations: [{ i: 2, label: '+8,310 lookup_order' }, { i: 4, label: '+8,530 search_faq' }],
+          endLabel: false,
+        },
+        {
+          type: 'hbar', title: 'Tool별 결과 크기 p95',
+          sub: 'AppGenAIContent.ToolCallResult · 문자 수를 토큰으로 환산',
+          fmt: 'tok', labelWidth: '10rem',
+          rows: [
+            { label: 'search_faq', value: 8320, aside: '호출 27,300회' },
+            { label: 'lookup_order', value: 8150, aside: '호출 41,200회' },
+            { label: 'get_refund_policy', value: 640, aside: '호출 4,980회' },
+            { label: 'create_ticket', value: 210, aside: '호출 6,480회' },
+          ],
+        },
+      ],
+    },
+    {
+      id: 'C3', name: '검색 컨텍스트 과다', verdict: '후보', from: ['S5'],
+      rule: '저점수 문서 비율이나 턴 내 중복 문서 비율이 높음',
+      finding: '검색 결과 문서의 42%가 점수 0.5 미만이다. 같은 턴에서 같은 문서가 다시 반환된 경우도 반환 문서의 9%다.',
+      waste: { usd: 21, formula: '(저점수 + 중복 문서 토큰) × 이후 남은 호출 수 × P_eff', inputs: '6.1M tok × 재전송 2.8회 × P_eff $1.244/1M' },
+      differential: ['점수 척도는 Azure AI Search semantic reranker 기준이다. 다른 엔진이면 임계값을 다시 정한다.'],
+      charts: [
+        {
+          type: 'columns', title: '검색 결과 문서 점수 분포',
+          sub: 'retrieval span · gen_ai.retrieval.documents.score · 7,900건',
+          fmt: 'int', xLabel: '점수 구간 하한', xName: '점수',
+          bins: [0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9].map((s, i) => ({
+            label: s.toFixed(1), value: [120, 340, 610, 980, 1240, 1460, 1320, 980, 610, 240][i], tone: s < 0.5 ? 'crit' : undefined,
+          })),
+          markers: [{ at: 5, label: '임계값 0.5', kind: 'thr' }],
+        },
+      ],
+    },
+    {
+      id: 'D1', name: '루프·중복 Tool 호출', verdict: '비해당', from: ['S5', 'S7'],
+      rule: '꼬리 턴 비용 비중 ≥ 0.15, 최대 반복에 도달한 턴이 있으면 확정',
+      basis: '꼬리 턴 비용 비중 0.11 · 최대 반복 도달 턴 220건이 모두 order-agent의 재고 조회 대기',
+      charts: [
+        {
+          type: 'columns', wide: true, title: '턴당 LLM 호출 수 분포',
+          sub: '쿼리: 턴당 호출 수 분포와 꼬리 비용 (D1) · 18,420턴',
+          fmt: 'int', xLabel: '턴당 LLM 호출 수', xName: '호출 수',
+          bins: [420, 1880, 3410, 4120, 3010, 1960, 1240, 820, 520, 330, 210, 130, 90, 60, 220].map((v, i) => ({ label: String(i + 1), value: v, tone: i === 14 ? 'crit' : undefined })),
+          markers: [{ at: 3.5, label: 'p50 4', kind: 'stat' }, { at: 9.5, label: 'p95 10', kind: 'stat' }, { at: 14.5, label: '최대 반복 15', kind: 'thr' }],
+          note: '빨간 막대는 프레임워크의 최대 반복 횟수에 걸린 턴이다.',
+        },
+      ],
+    },
+    {
+      id: 'D2', name: '병렬 가능한 호출의 순차 처리', verdict: '미점검', from: ['S7'],
+      rule: '라운드당 tool 수가 1에 가깝고 연속 tool 사이에 의존이 없음',
+      basis: '연결 증상 S7 정상',
+      charts: [
+        {
+          type: 'columns', title: '라운드당 실행된 tool 수',
+          sub: '쿼리: 라운드당 Tool 수 (D2) · tool 호출로 끝난 LLM 호출 8,240회',
+          fmt: 'int', capLabels: true, xLabel: '라운드당 tool 수', xName: 'tool',
+          bins: [{ label: '1', value: 6820 }, { label: '2', value: 1140 }, { label: '3', value: 220 }, { label: '4+', value: 60 }],
+        },
+      ],
+    },
+    {
+      id: 'D3', name: '결정적 단계의 LLM 처리', verdict: '후보', from: ['S11'],
+      rule: '짧은 출력 호출의 비용 비중이 의미 있고 출력 다양성이 낮음',
+      finding: '라우팅용 짧은 출력 호출의 응답이 order, refund, faq, other 네 값으로만 나온다. 규칙 기반 라우팅으로 대체할 수 있는 후보다.',
+      waste: { usd: 58, formula: '해당 호출 비용 전체 (규칙으로 대체할 때의 상한)', inputs: '짧은 출력 호출 19,420회 중 라우팅 호출 비용', bound: true },
+      differential: ['E1과 겹친다. 소형 모델 전환과 규칙 대체 중 하나만 적용된다.'],
+      charts: [
+        {
+          type: 'hbar', title: '짧은 출력 호출의 응답 값 빈도',
+          sub: '쿼리: 짧은 출력의 다양성 (D3) · 19,420회',
+          fmt: 'int', labelWidth: '8rem',
+          rows: [
+            { label: 'order', value: 8420, aside: '43.4%' },
+            { label: 'refund', value: 5130, aside: '26.4%' },
+            { label: 'faq', value: 3960, aside: '20.4%' },
+            { label: 'other', value: 1910, aside: '9.8%' },
+          ],
+        },
+      ],
+    },
+    {
+      id: 'D4', name: '에이전트 간 컨텍스트 중복', verdict: '미점검', from: ['S8'],
+      rule: '위임 시 Input 전달 비율 ≥ 0.8',
+      basis: '연결 증상 S8 정상 (전달 비율 0.46)',
+      charts: [
+        {
+          type: 'hbar', title: '하위 에이전트별 위임 시 Input 전달 비율',
+          sub: '쿼리: 위임 시 Input 전달량 (D4) · (하위 첫 호출 InTok − S_sub) ÷ 직전 상위 InTok',
+          fmt: 'ratio', max: 1, threshold: { value: 0.8, dir: 'above', label: '기준 0.8' },
+          rows: [
+            { label: 'order-agent', value: 0.38, aside: '위임 4,210회' },
+            { label: 'refund-agent', value: 0.54, aside: '위임 1,330회' },
+          ],
+        },
+      ],
+    },
+    {
+      id: 'E1', name: '단순 단계에 상위 모델', verdict: '해당', from: ['S9', 'S11'],
+      rule: '잠재 절감 비중 ≥ 0.1',
+      finding: '계획·tool 선택·짧은 출력 단계(유형 1–3)의 gpt-5.4 비용 $574를 gpt-5-mini 단가로 다시 계산하면 $115다. 차이 $459가 전체 비용의 14%다.',
+      waste: { usd: 459, formula: 'Σ(유형 1–3 상위 모델 호출) [Cost − 소형 모델 단가로 다시 계산한 Cost]', inputs: '$574 − $115', bound: true },
+      differential: ['상한값이다. 소형 모델로 품질이 유지되는지는 별도 평가가 필요하다.', 'D3과 겹친다. 유형 3 중 라우팅 호출은 규칙 대체 후보이기도 하다.'],
+      charts: [
+        {
+          type: 'stackbar', wide: true, title: '호출 유형 × 모델별 비용',
+          sub: '쿼리: 호출 유형별·모델별 비용 (E1) · USD, 분석 기간 합계',
+          fmt: 'usd', labelWidth: '13rem', series: [{ name: 'gpt-5.4' }, { name: 'gpt-5-mini' }],
+          rows: [
+            { label: '1. 계획·첫 tool 선택', segs: [262, 0], tag: '후보' },
+            { label: '2. tool 결과 처리·다음 tool 선택', segs: [236, 120], tag: '후보' },
+            { label: '3. 짧은 출력', segs: [76, 44], tag: '후보' },
+            { label: '4. 최종 응답', segs: [1940, 0] },
+            { label: '5. 기타', segs: [602, 0] },
+          ],
+        },
+      ],
+    },
+    {
+      id: 'E2', name: 'Reasoning 과다', verdict: '해당', from: ['S9'],
+      rule: '단순 단계가 최종 응답 단계와 같은 reasoning 수준·분포 (수치 기준 없음)',
+      finding: '모든 호출이 reasoning 수준 high로 실행된다. 계획·tool 선택 단계의 ReasonTok 분포가 최종 응답 단계와 거의 같다.',
+      waste: { usd: 160, formula: 'Σ(유형 1–3 호출) (ReasonTok − 저수준 샘플 ReasonTok p50) × P_out', inputs: '(1,140 − 210) tok × 21,500회 × $8.00/1M (저수준 값은 샘플 200건 재실행)' },
+      differential: ['E1과 함께 고치면 절감이 겹친다. 소형 모델로 바꾸면 reasoning 설정도 다시 정하기 때문이다.'],
+      charts: [
+        {
+          type: 'box', wide: true, title: '호출 유형별 ReasonTok 분포',
+          sub: 'gen_ai.usage.reasoning.output_tokens · gen_ai.request.reasoning.level = high (전 유형)',
+          fmt: 'tok',
+          rows: [
+            { label: '1. 계획·첫 tool 선택', v: [180, 820, 1240, 1960, 4100] },
+            { label: '2. tool 결과 처리·다음 tool 선택', v: [140, 760, 1180, 1840, 3900] },
+            { label: '3. 짧은 출력', v: [110, 640, 980, 1520, 2900] },
+            { label: '4. 최종 응답', v: [400, 1100, 1620, 2480, 5800] },
+          ],
+          note: '상자는 Q1–Q3, 상자 안 틈은 중앙값, 수염은 최소–최대다.',
+        },
+      ],
+    },
+    {
+      id: 'E3', name: '장황한 최종 응답', verdict: '판정 보류', from: ['S10'],
+      rule: '고객이 정한 목표 길이가 있을 때 P95가 목표를 넘고 샘플에서 반복 확인 (없으면 판정 보류)',
+      basis: '목표 응답 길이 미정 → 고객과 확인',
+      charts: [
+        {
+          type: 'columns', wide: true, title: '최종 응답 길이 분포',
+          sub: '쿼리: 최종 응답 길이 (E3) · 가시 출력 = OutTok − ReasonTok · 18,420턴',
+          fmt: 'int', xLabel: '가시 출력 토큰 (구간 하한)', xName: '구간',
+          bins: ['0', '200', '400', '600', '800', '1k', '1.2k', '1.4k', '1.6k+'].map((l, i) => ({ label: l, value: [1820, 4210, 5030, 3140, 1710, 890, 610, 420, 590][i] })),
+          markers: [{ at: 2.6, label: 'p50 520', kind: 'stat' }, { at: 7.2, label: 'p95 1,440', kind: 'stat' }],
+          note: '목표 길이를 정하면 그 값에 기준선을 그린다.',
+        },
+      ],
+    },
+    {
+      id: 'E4', name: '출력 잘림', verdict: '미점검', from: ['S12'],
+      rule: '잘림이 반복되고 잘린 뒤 같은 턴에서 후속 호출이 이어짐',
+      basis: '연결 증상 S12 정상',
+      charts: [
+        {
+          type: 'hbar', title: '에이전트별 출력 잘림 비율',
+          sub: '쿼리: 출력 잘림 (E4) · finish_reasons length 또는 status incomplete',
+          fmt: 'pct',
+          rows: [
+            { label: 'support-router', value: 0.004 },
+            { label: 'order-agent', value: 0.018, aside: 'reasoning 소진형 72%' },
+            { label: 'refund-agent', value: 0.002 },
+          ],
+        },
+      ],
+    },
+    {
+      id: 'F1', name: 'Tool 실패 후 재시도', verdict: '미점검', from: ['S7', 'S12'],
+      rule: '특정 tool의 실패율이 높고 실패 턴의 비용이 정상 턴보다 큼',
+      basis: '연결 증상 S7·S12 정상',
+      charts: [
+        {
+          type: 'hbar', title: 'Tool별 실패율',
+          sub: '쿼리: Tool별 실패율 (F1) · execute_tool span의 Success',
+          fmt: 'pct', labelWidth: '10rem',
+          rows: [
+            { label: 'update_address', value: 0.125, aside: '호출 96회' },
+            { label: 'lookup_order', value: 0.062, aside: '호출 41,200회' },
+            { label: 'create_ticket', value: 0.031, aside: '호출 6,480회' },
+            { label: 'search_faq', value: 0.008, aside: '호출 27,300회' },
+          ],
+        },
+      ],
+    },
+    {
+      id: 'F2', name: 'LLM 호출 오류·재요청', verdict: '미점검', from: ['S7', 'S12'],
+      rule: '실패 호출 비율이 높거나 같은 입력의 재요청이 반복됨',
+      basis: '연결 증상 S7·S12 정상',
+      charts: [
+        {
+          type: 'hbar', title: '오류 유형별 비용',
+          sub: '쿼리: LLM 호출 실패와 재요청 (F2) · ResultCode, error.type',
+          fmt: 'usd', labelWidth: '12rem',
+          rows: [
+            { label: '출력 파싱 실패 후 재요청', value: 34, aside: '1,240회' },
+            { label: 'content_filter', value: 12, aside: '310회' },
+            { label: '5xx 서버 오류', value: 3, aside: '88회' },
+            { label: '429 (토큰 기록 없음)', value: 0, aside: '642회' },
+          ],
+        },
+      ],
+    },
+    {
+      id: 'F3', name: '사용자 재질문', verdict: '미점검', from: ['S12'],
+      rule: '재질문 비율이 높고 재질문 직전 응답이 샘플에서 불완전',
+      basis: '연결 증상 S12 정상',
+      charts: [
+        {
+          type: 'pairs', wide: true, title: '재질문으로 판정된 메시지 쌍',
+          sub: '쿼리: 대화별 사용자 메시지 추출 (F3) · 임베딩 코사인 유사도 ≥ 0.85',
+          pairs: [
+            { a: '환불 신청한 거 언제 입금돼요?', b: '주문번호 2381 환불 입금일이 언제예요?', gap: '38초', sim: 0.91 },
+            { a: '배송지 바꿀 수 있나요?', b: '어제 주문한 거 배송지 변경하고 싶어요', gap: '52초', sim: 0.88 },
+          ],
+        },
+      ],
+    },
+    {
+      id: 'F4', name: '실패로 끝난 턴', verdict: '미점검', from: ['S12'],
+      rule: '늦은 실패 계수(실패 턴 비용 비중 ÷ 실패 턴 비율) ≥ 1.5',
+      basis: '늦은 실패 계수 1.2',
+      charts: [
+        {
+          type: 'hbar', title: '에이전트별 늦은 실패 계수',
+          sub: '쿼리: 실패 턴 비용 (F4) · 1을 넘으면 실패 턴이 평균 턴보다 비쌈',
+          fmt: 'x', max: 2, threshold: { value: 1.5, dir: 'above', label: '기준 1.5' },
+          rows: [
+            { label: 'support-router', value: 1.1, aside: '실패 턴 1.9%' },
+            { label: 'order-agent', value: 1.3, aside: '실패 턴 3.4%' },
+            { label: 'refund-agent', value: 1.2, aside: '실패 턴 2.2%' },
+          ],
+        },
+      ],
+    },
+  ],
+};
+
+/* =====================================================================
+   렌더러
+   ===================================================================== */
+const NS = 'http://www.w3.org/2000/svg';
+const NF = new Intl.NumberFormat('ko-KR');
+const REDUCED = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+const VERDICT = {
+  '해당': { cls: 'v-hit', icon: 'dot' },
+  '후보': { cls: 'v-cand', icon: 'half' },
+  '비해당': { cls: 'v-no', icon: 'ring' },
+  '계측 부재': { cls: 'v-nodata', icon: 'slash' },
+  '판정 보류': { cls: 'v-hold', icon: 'diamond' },
+  '미점검': { cls: 'v-skip', icon: 'dash' },
+};
+const SYM = {
+  abnormal: { label: '이상', cls: 'v-hit', icon: 'tri' },
+  normal: { label: '정상', cls: 'v-no', icon: 'check' },
+  nodata: { label: '계측 부재', cls: 'v-nodata', icon: 'slash' },
+  hold: { label: '판정 보류', cls: 'v-hold', icon: 'diamond' },
+};
+const ICONS = {
+  tri: '<path d="M6 1.6 10.8 10.2H1.2Z" fill="currentColor"/>',
+  check: '<path d="M2.2 6.4 4.9 9 9.8 3.2" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>',
+  slash: '<circle cx="6" cy="6" r="4.3" fill="none" stroke="currentColor" stroke-width="1.5"/><path d="M3 9 9 3" stroke="currentColor" stroke-width="1.5"/>',
+  diamond: '<path d="M6 1.5 10.5 6 6 10.5 1.5 6Z" fill="none" stroke="currentColor" stroke-width="1.5"/>',
+  dot: '<circle cx="6" cy="6" r="4.5" fill="currentColor"/>',
+  half: '<circle cx="6" cy="6" r="4.3" fill="none" stroke="currentColor" stroke-width="1.5"/><path d="M6 1.7a4.3 4.3 0 0 1 0 8.6Z" fill="currentColor"/>',
+  ring: '<circle cx="6" cy="6" r="4.3" fill="none" stroke="currentColor" stroke-width="1.5"/>',
+  dash: '<path d="M2.5 6h7" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/>',
+  info: '<circle cx="6" cy="6" r="4.6" fill="none" stroke="currentColor" stroke-width="1.4"/><path d="M6 5.4v3.2M6 3.6v.1" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>',
+};
+
+function el(tag, attrs = {}, ...kids) {
+  const e = document.createElement(tag);
+  for (const [k, v] of Object.entries(attrs)) {
+    if (v == null || v === false) continue;
+    if (k === 'class') e.className = v;
+    else if (k === 'text') e.textContent = v;
+    else if (k === 'style') e.style.cssText = v;
+    else if (k.startsWith('on')) e.addEventListener(k.slice(2), v);
+    else e.setAttribute(k, v === true ? '' : v);
+  }
+  for (const c of kids.flat()) {
+    if (c == null || c === false) continue;
+    e.append(c instanceof Node ? c : document.createTextNode(String(c)));
+  }
+  return e;
+}
+function sv(tag, attrs = {}, text) {
+  const e = document.createElementNS(NS, tag);
+  for (const [k, v] of Object.entries(attrs)) if (v != null && v !== false) e.setAttribute(k, v);
+  if (text != null) e.textContent = text;
+  return e;
+}
+function icon(name) {
+  const s = document.createElementNS(NS, 'svg');
+  s.setAttribute('viewBox', '0 0 12 12');
+  s.setAttribute('class', 'ico');
+  s.setAttribute('aria-hidden', 'true');
+  s.innerHTML = ICONS[name];
+  return s;
+}
+function pill(cls, iconName, label) { return el('span', { class: `pill ${cls}` }, icon(iconName), label); }
+function verdictPill(v, prefix = '') { const m = VERDICT[v]; return pill(m.cls, m.icon, prefix + v); }
+
+function pctStr(v) { const r = Math.round(v * 1000) / 10; return (Number.isInteger(r) ? r : r.toFixed(1)) + '%'; }
+function fmtV(fmt, v) {
+  if (v == null || Number.isNaN(v)) return '—';
+  switch (fmt) {
+    case 'pct': return pctStr(v);
+    case 'usd': return '$' + NF.format(Math.round(v));
+    case 'tok': return NF.format(Math.round(v)) + ' tok';
+    case 'ratio': return v.toFixed(2);
+    case 'x': return (+v.toFixed(2)) + '×';
+    default: return NF.format(Math.round(v));
+  }
+}
+function compact(v, max) { if (v === 0) return '0'; return max >= 10000 ? (+(v / 1000).toFixed(1)) + 'K' : NF.format(v); }
+function tickFmt(fmt, v, max) {
+  if (fmt === 'pct') return pctStr(v);
+  if (fmt === 'usd') return '$' + compact(v, max);
+  if (fmt === 'ratio') return String(+v.toFixed(2));
+  if (fmt === 'x') return (+v.toFixed(2)) + '×';
+  return compact(v, max);
+}
+function nice(maxV, n = 4) {
+  if (!(maxV > 0)) maxV = 1;
+  const raw = maxV / n;
+  const pow = 10 ** Math.floor(Math.log10(raw));
+  const e = raw / pow;
+  const step = (e >= 7.5 ? 10 : e >= 3.5 ? 5 : e >= 1.5 ? 2 : 1) * pow;
+  const max = Math.ceil(maxV / step - 1e-9) * step;
+  const ticks = [];
+  for (let i = 0; i * step <= max + step * 1e-6; i++) ticks.push(+(i * step).toFixed(10));
+  return { ticks, max };
+}
+function textW(s, px = 11.5) {
+  let w = 0;
+  for (const ch of String(s)) w += ch.charCodeAt(0) > 0x2e80 ? px * 1.02 : px * 0.58;
+  return w;
+}
+function isBad(v, t) { return t.dir === 'below' ? v < t.value : v >= t.value; }
+const sum = a => a.reduce((x, y) => x + y, 0);
+
+/* ---------- 툴팁 ---------- */
+const tip = document.getElementById('tip');
+let tipTarget = null;
+function tipShow(lines, cx, cy) {
+  tip.replaceChildren(...lines.map((l, i) => el(i === 0 ? 'strong' : 'span', { text: l })));
+  tip.hidden = false;
+  tipPlace(cx, cy);
+}
+function tipPlace(cx, cy) {
+  const r = tip.getBoundingClientRect();
+  let x = cx + 14, y = cy + 14;
+  if (x + r.width > innerWidth - 8) x = cx - r.width - 14;
+  if (y + r.height > innerHeight - 8) y = cy - r.height - 14;
+  tip.style.left = Math.max(8, x) + 'px';
+  tip.style.top = Math.max(8, y) + 'px';
+}
+function tipHide() { tip.hidden = true; }
+document.addEventListener('pointermove', e => {
+  const t = e.target.closest ? e.target.closest('[data-tip]') : null;
+  if (t) {
+    if (t !== tipTarget) { tipTarget = t; tipShow(t.getAttribute('data-tip').split('\n'), e.clientX, e.clientY); }
+    else tipPlace(e.clientX, e.clientY);
+  } else if (tipTarget) { tipTarget = null; tipHide(); }
+});
+document.addEventListener('focusin', e => {
+  const t = e.target.closest ? e.target.closest('[data-tip]') : null;
+  if (!t) return;
+  tipTarget = t;
+  const r = t.getBoundingClientRect();
+  tipShow(t.getAttribute('data-tip').split('\n'), r.left + Math.min(r.width / 2, 120), r.top - 4);
+});
+document.addEventListener('focusout', () => { tipTarget = null; tipHide(); });
+document.addEventListener('scroll', () => { if (tipTarget) { tipTarget = null; tipHide(); } }, { passive: true });
+
+/* ---------- 범례 ---------- */
+function legend(items) {
+  return el('ul', { class: 'legend' }, items.map(it => el('li', {}, el('span', { class: `sw ${it.tone}` }), it.label)));
+}
+
+/* ---------- 가로 막대 (HTML) ---------- */
+function hbar(spec) {
+  const fmt = spec.fmt || 'int';
+  const t = spec.threshold;
+  const vals = spec.rows.map(r => r.value ?? 0);
+  const { ticks, max } = nice(spec.max ?? Math.max(...vals, t ? t.value : 0) * 1.06);
+  const pct = v => Math.max(0, Math.min(100, (v / max) * 100));
+  const wrap = el('div', { class: 'hb', style: [spec.labelWidth ? `--lw:${spec.labelWidth}` : '', spec.valueWidth ? `--vw:${spec.valueWidth}` : ''].join(';') || null });
+  if (spec.legend) wrap.append(legend(spec.legend));
+  const scale = el('div', { class: 'hb-scale' });
+  ticks.forEach((v, i) => scale.append(el('span', { class: 'hb-tick' + (i === 0 ? ' first' : ''), style: `left:${pct(v)}%`, text: tickFmt(fmt, v, max) })));
+  if (t) {
+    const p = pct(t.value);
+    scale.append(el('span', { class: 'hb-thr-label' + (p > 82 ? ' edge-r' : p < 12 ? ' edge-l' : ''), style: `left:${p}%`, text: t.label }));
+  }
+  wrap.append(el('div', { class: 'hb-row hb-axis', 'aria-hidden': 'true' }, el('div', { class: 'hb-label' }), scale, el('div', { class: 'hb-val' })));
+  const gs = ticks.length > 1 ? pct(ticks[1]) : 100;
+  for (const r of spec.rows) {
+    const label = el('div', { class: 'hb-label' },
+      r.code ? el('span', { class: 'code', text: r.code }) : null,
+      r.href ? el('a', { href: r.href, text: r.label, 'data-cause': r.causeId || null }) : el('span', { text: r.label }),
+      r.tag ? el('span', { class: 'tag', text: r.tag }) : null);
+    const track = el('div', { class: 'hb-track', style: `--gs:${gs}%` });
+    let val;
+    if (r.chip) {
+      const m = SYM[r.chip];
+      track.append(el('span', { class: `hb-chip ${m.cls}` }, icon(m.icon), r.chipText || m.label));
+      val = el('div', { class: 'hb-val' }, el('span', { class: 'hb-num', text: '—' }), r.aside ? el('span', { class: 'hb-aside', text: r.aside }) : null);
+    } else {
+      const bad = t ? isBad(r.value, t) : false;
+      const tone = r.tone ? 't-' + r.tone : (t ? (bad ? 't-crit' : 't-quiet') : 't-v1');
+      const v = fmtV(fmt, r.value);
+      const lines = [v, r.label, r.aside, t ? `${t.label} ${bad ? (t.dir === 'below' ? '미달' : '초과') : '이내'}` : null].filter(Boolean);
+      track.setAttribute('tabindex', '0');
+      track.setAttribute('data-tip', lines.join('\n'));
+      track.setAttribute('aria-label', lines.join(', '));
+      track.append(el('div', { class: `hb-bar ${tone}`, style: `width:${r.value > 0 ? Math.max(pct(r.value), 0.4) : 0}%` }));
+      val = el('div', { class: 'hb-val' }, el('span', { class: 'hb-num' }, bad ? icon('tri') : null, v), r.aside ? el('span', { class: 'hb-aside', text: r.aside }) : null);
+    }
+    if (t) track.append(el('span', { class: 'hb-thr', style: `left:${pct(t.value)}%` }));
+    wrap.append(el('div', { class: 'hb-row' }, label, track, val));
+  }
+  return wrap;
+}
+
+/* ---------- 누적 가로 막대 ---------- */
+function stackbar(spec) {
+  const fmt = spec.fmt || 'int';
+  const totals = spec.rows.map(r => sum(r.segs));
+  const { ticks, max } = nice(spec.max ?? Math.max(...totals) * 1.06);
+  const pct = v => (v / max) * 100;
+  const wrap = el('div', { class: 'hb', style: spec.labelWidth ? `--lw:${spec.labelWidth}` : null });
+  wrap.append(legend(spec.series.map((s, i) => ({ tone: 'c' + (i + 1), label: s.name }))));
+  const scale = el('div', { class: 'hb-scale' });
+  ticks.forEach((v, i) => scale.append(el('span', { class: 'hb-tick' + (i === 0 ? ' first' : ''), style: `left:${pct(v)}%`, text: tickFmt(fmt, v, max) })));
+  wrap.append(el('div', { class: 'hb-row hb-axis', 'aria-hidden': 'true' }, el('div', { class: 'hb-label' }), scale, el('div', { class: 'hb-val' })));
+  const gs = ticks.length > 1 ? pct(ticks[1]) : 100;
+  spec.rows.forEach((r, ri) => {
+    const stack = el('div', { class: 'hb-stack', style: `width:${pct(totals[ri])}%` });
+    r.segs.forEach((v, i) => {
+      if (v <= 0) return;
+      const lines = [fmtV(fmt, v), `${spec.series[i].name} · ${r.label}`, `비중 ${pctStr(v / totals[ri])}`];
+      stack.append(el('div', { class: `seg c${i + 1}`, style: `flex:${v} 1 0`, tabindex: '0', 'data-tip': lines.join('\n'), 'aria-label': lines.join(', ') }));
+    });
+    wrap.append(el('div', { class: 'hb-row' },
+      el('div', { class: 'hb-label' }, el('span', { text: r.label }), r.tag ? el('span', { class: 'tag', text: r.tag }) : null),
+      el('div', { class: 'hb-track', style: `--gs:${gs}%` }, stack),
+      el('div', { class: 'hb-val' }, el('span', { class: 'hb-num', text: fmtV(fmt, totals[ri]) }))));
+  });
+  return wrap;
+}
+
+/* ---------- 분할 막대 (전체 = 1) ---------- */
+function segbar(spec) {
+  const fmt = spec.fmt || 'int';
+  const total = sum(spec.parts.map(p => p.value));
+  const bar = el('div', { class: 'segbar', role: 'img', 'aria-label': spec.parts.map(p => `${p.name} ${fmtV(fmt, p.value)} (${pctStr(p.value / total)})`).join(', ') });
+  spec.parts.forEach((p, i) => {
+    const share = pctStr(p.value / total);
+    bar.append(el('div', { class: `segpart c${i + 1}`, style: `flex:${p.value} 1 0`, tabindex: '0', 'data-tip': `${fmtV(fmt, p.value)} · ${share}\n${p.name}` }, el('span', { text: share })));
+  });
+  const fit = () => bar.querySelectorAll('.segpart').forEach(part => {
+    const s = part.firstChild;
+    s.hidden = false;
+    if (s.offsetWidth + 14 > part.clientWidth) s.hidden = true;
+  });
+  new ResizeObserver(fit).observe(bar);
+  return el('div', {}, bar,
+    el('ul', { class: 'legend', style: 'margin-top:.625rem' }, spec.parts.map((p, i) => el('li', {}, el('span', { class: `sw c${i + 1}` }), p.name))),
+    el('p', { class: 'seg-total', text: `합계 ${fmtV(fmt, total)} · 막대 안 숫자는 비중` }));
+}
+
+/* ---------- 세로 막대 · 히스토그램 (SVG) ---------- */
+function topRounded(x, y, w, h, r) {
+  if (h <= 0) return '';
+  r = Math.min(r, w / 2, h);
+  return `M${x},${y + h}V${y + r}Q${x},${y} ${x + r},${y}H${x + w - r}Q${x + w},${y} ${x + w},${y + r}V${y + h}Z`;
+}
+function rectPath(x, y, w, h) { return h <= 0 ? '' : `M${x},${y}h${w}v${h}h${-w}Z`; }
+function multiText(svg, x, y, label, cls, anchor = 'middle') {
+  const t = sv('text', { x, y, class: cls, 'text-anchor': anchor });
+  String(label).split('\n').forEach((ln, i) => t.append(sv('tspan', { x, dy: i ? 13 : 0 }, ln)));
+  svg.append(t);
+}
+function placeMarkerLabels(markers, xOf, W) {
+  let lastRight = -1e9, row = 0;
+  return markers.slice().sort((a, b) => a.at - b.at).map(m => {
+    const x = xOf(m);
+    const w = textW(m.label, 11);
+    let anchor = 'middle', left = x - w / 2;
+    if (left < 2) { anchor = 'start'; left = x - 2; }
+    if (left + w > W - 2) { anchor = 'end'; left = x - w; }
+    row = left < lastRight + 8 ? 1 - row : 0;
+    lastRight = left + w;
+    return { ...m, x, anchor, row };
+  });
+}
+function columns(spec, W) {
+  const fmt = spec.fmt || 'int';
+  const bins = spec.bins, n = bins.length;
+  const multiLine = bins.some(b => String(b.label).includes('\n'));
+  const H = spec.height || (multiLine ? 236 : 222);
+  const m = { l: 46, r: 12, t: 34, b: (multiLine ? 44 : 30) + (spec.xLabel ? 18 : 0) };
+  const iw = Math.max(80, W - m.l - m.r), ih = H - m.t - m.b;
+  const totals = bins.map(b => (b.segs ? sum(b.segs) : b.value));
+  const { ticks, max } = nice(spec.yMax ?? Math.max(...totals) * (spec.capLabels ? 1.15 : 1.06));
+  const y = v => m.t + ih - (v / max) * ih;
+  const slot = iw / n, bw = Math.max(6, Math.min(24, slot - 6));
+  const svg = sv('svg', { width: W, height: H, viewBox: `0 0 ${W} ${H}`, class: 'viz', role: 'img', 'aria-label': spec.title });
+  ticks.forEach(v => {
+    svg.append(sv('line', { x1: m.l, x2: m.l + iw, y1: y(v), y2: y(v), class: v === 0 ? 'axis' : 'grid' }));
+    svg.append(sv('text', { x: m.l - 8, y: y(v) + 4, 'text-anchor': 'end' }, tickFmt(fmt, v, max)));
+  });
+  const est = Math.max(...bins.map(b => Math.max(...String(b.label).split('\n').map(s => textW(s)))));
+  const every = Math.max(1, Math.ceil((est + 8) / slot));
+  const series = spec.series || [];
+  bins.forEach((b, i) => {
+    const cx = m.l + slot * (i + 0.5);
+    const tipLines = b.segs
+      ? [fmtV(fmt, totals[i]) + ' 합계', `${spec.xName || ''} ${String(b.label).replace(/\n/g, ' ')}`.trim(), ...b.segs.map((v, j) => `${series[j] ? series[j].name : '계열 ' + (j + 1)} ${fmtV(fmt, v)}`)]
+      : [fmtV(fmt, b.value), `${spec.xName || ''} ${String(b.label).replace(/\n/g, ' ')}`.trim(), b.n || null].filter(Boolean);
+    const g = sv('g', { class: 'col', tabindex: '0', 'data-tip': tipLines.join('\n'), 'aria-label': tipLines.join(', ') });
+    g.append(sv('rect', { x: m.l + slot * i, y: m.t, width: slot, height: ih, class: 'hit' }));
+    if (b.segs) {
+      let base = y(0);
+      const lastNZ = b.segs.reduce((acc, v, j) => (v > 0 ? j : acc), -1);
+      b.segs.forEach((v, j) => {
+        if (v <= 0) return;
+        const h = (v / max) * ih;
+        const gap = base < y(0) ? 2 : 0;
+        const top = base - h;
+        const d = j === lastNZ ? topRounded(cx - bw / 2, top, bw, h - gap, 4) : rectPath(cx - bw / 2, top, bw, h - gap);
+        g.append(sv('path', { d, class: `mark c${j + 1}` }));
+        base = top;
+      });
+    } else {
+      g.append(sv('path', { d: topRounded(cx - bw / 2, y(b.value), bw, (b.value / max) * ih, 4), class: `mark t-${b.tone || 'v1'}` }));
+      if (spec.capLabels) svg.append(sv('text', { x: cx, y: y(b.value) - 6, 'text-anchor': 'middle', class: 'cap' }, fmtV(fmt, b.value)));
+    }
+    svg.append(g);
+    if (i % every === 0) multiText(svg, cx, m.t + ih + 16, b.label, '');
+  });
+  if (spec.markers) {
+    const placed = placeMarkerLabels(spec.markers, mk => m.l + mk.at * slot, W);
+    placed.forEach(mk => {
+      const ty = 11 + mk.row * 13;
+      svg.append(sv('line', { x1: mk.x, x2: mk.x, y1: ty + 5, y2: m.t + ih, class: mk.kind === 'thr' ? 'thr' : 'stat' }));
+      svg.append(sv('text', { x: mk.x, y: ty, 'text-anchor': mk.anchor, class: 'mlabel' }, mk.label));
+    });
+  }
+  if (spec.xLabel) svg.append(sv('text', { x: m.l + iw / 2, y: H - 4, 'text-anchor': 'middle', class: 'xtitle' }, spec.xLabel));
+  return svg;
+}
+
+/* ---------- 선 그래프 (SVG) ---------- */
+function lineChart(spec, W) {
+  const fmt = spec.fmt || 'int';
+  const pts = spec.points, n = pts.length;
+  const H = spec.height || 248;
+  const m = { l: 50, r: 16, t: 34, b: spec.xLabel ? 48 : 30 };
+  const iw = Math.max(80, W - m.l - m.r), ih = H - m.t - m.b;
+  const t = spec.threshold;
+  const { ticks, max } = nice(Math.max(...pts.map(p => p.y), t ? t.value : 0) * 1.06, 5);
+  const x = i => m.l + (n === 1 ? iw / 2 : (i * iw) / (n - 1));
+  const y = v => m.t + ih - (v / max) * ih;
+  const svg = sv('svg', { width: W, height: H, viewBox: `0 0 ${W} ${H}`, class: 'viz', role: 'img', 'aria-label': spec.title });
+  ticks.forEach(v => {
+    svg.append(sv('line', { x1: m.l, x2: m.l + iw, y1: y(v), y2: y(v), class: v === 0 ? 'axis' : 'grid' }));
+    svg.append(sv('text', { x: m.l - 8, y: y(v) + 4, 'text-anchor': 'end' }, tickFmt(fmt, v, max)));
+  });
+  const every = Math.max(1, Math.ceil((Math.max(...pts.map(p => textW(p.x))) + 10) / (iw / Math.max(1, n - 1))));
+  pts.forEach((p, i) => { if (i % every === 0 || i === n - 1) svg.append(sv('text', { x: x(i), y: m.t + ih + 16, 'text-anchor': 'middle' }, p.x)); });
+  if (spec.xLabel) svg.append(sv('text', { x: m.l + iw / 2, y: H - 4, 'text-anchor': 'middle', class: 'xtitle' }, spec.xLabel));
+  if (t) {
+    svg.append(sv('line', { x1: m.l, x2: m.l + iw, y1: y(t.value), y2: y(t.value), class: 'thr' }));
+    svg.append(sv('text', { x: m.l + iw, y: y(t.value) - 6, 'text-anchor': 'end', class: 'mlabel' }, `${t.label} · ${fmtV(fmt, t.value)}`));
+  }
+  (spec.vmarkers || []).forEach(vm => {
+    svg.append(sv('line', { x1: x(vm.i), x2: x(vm.i), y1: 16, y2: m.t + ih, class: 'stat' }));
+    const w = textW(vm.label, 11);
+    const anchor = x(vm.i) + w / 2 > W - 2 ? 'end' : 'middle';
+    svg.append(sv('text', { x: x(vm.i), y: 11, 'text-anchor': anchor, class: 'mlabel' }, vm.label));
+  });
+  const d = pts.map((p, i) => `${i ? 'L' : 'M'}${x(i)},${y(p.y)}`).join('');
+  svg.append(sv('path', { d: `${d}L${x(n - 1)},${y(0)}L${x(0)},${y(0)}Z`, class: 'area' }));
+  svg.append(sv('path', { d, class: 'line' }));
+  (spec.annotations || []).forEach(a => {
+    const ax = x(a.i), ay = y(pts[a.i].y);
+    svg.append(sv('circle', { cx: ax, cy: ay, r: 4.5, class: 'dot' }));
+    const w = textW(a.label);
+    let anchor = 'start', tx = ax + 8;
+    if (tx + w > m.l + iw) { anchor = 'end'; tx = ax - 8; }
+    svg.append(sv('text', { x: tx, y: ay + 18, 'text-anchor': anchor, class: 'note' }, a.label));
+  });
+  svg.append(sv('circle', { cx: x(n - 1), cy: y(pts[n - 1].y), r: 4.5, class: 'dot' }));
+  if (spec.endLabel) svg.append(sv('text', { x: x(n - 1) - 8, y: y(pts[n - 1].y) - 10, 'text-anchor': 'end', class: 'note' }, fmtV(fmt, pts[n - 1].y)));
+  // 크로스헤어
+  const xh = sv('line', { y1: m.t, y2: m.t + ih, class: 'xhair', visibility: 'hidden' });
+  const xd = sv('circle', { r: 5, class: 'dot', visibility: 'hidden' });
+  svg.append(xh, xd);
+  const ov = sv('rect', { x: m.l - 10, y: m.t, width: iw + 20, height: ih, class: 'overlay', tabindex: '0', 'aria-label': `${spec.title}. 좌우 화살표로 값을 읽는다.` });
+  svg.append(ov);
+  let cur = n - 1;
+  const show = (i, cx, cy) => {
+    cur = Math.max(0, Math.min(n - 1, i));
+    const px = x(cur), py = y(pts[cur].y);
+    for (const k of [xh, xd]) k.setAttribute('visibility', 'visible');
+    xh.setAttribute('x1', px); xh.setAttribute('x2', px);
+    xd.setAttribute('cx', px); xd.setAttribute('cy', py);
+    const rect = svg.getBoundingClientRect();
+    tipShow([fmtV(fmt, pts[cur].y), `${spec.xName || ''} ${pts[cur].x}`.trim(), t ? `${t.label} 대비 ${(pts[cur].y / t.value).toFixed(2)}배` : null].filter(Boolean),
+      cx ?? rect.left + px, cy ?? rect.top + py - 30);
+  };
+  const hide = () => { for (const k of [xh, xd]) k.setAttribute('visibility', 'hidden'); tipHide(); };
+  ov.addEventListener('pointermove', e => { const r = svg.getBoundingClientRect(); show(Math.round(((e.clientX - r.left - m.l) / iw) * (n - 1)), e.clientX, e.clientY); });
+  ov.addEventListener('pointerleave', hide);
+  ov.addEventListener('focus', () => show(cur));
+  ov.addEventListener('blur', hide);
+  ov.addEventListener('keydown', e => {
+    if (e.key === 'ArrowRight' || e.key === 'ArrowLeft') { e.preventDefault(); show(cur + (e.key === 'ArrowRight' ? 1 : -1)); }
+  });
+  return svg;
+}
+
+/* ---------- 상자 그림 (SVG) ---------- */
+function boxChart(spec, W) {
+  const fmt = spec.fmt || 'int';
+  const rows = spec.rows, rowH = 54;
+  const m = { l: 6, r: 18, t: 6, b: 26 };
+  const H = m.t + rows.length * rowH + m.b;
+  const iw = Math.max(80, W - m.l - m.r);
+  const { ticks, max } = nice(Math.max(...rows.map(r => r.v[4])) * 1.04, 5);
+  const x = v => m.l + (v / max) * iw;
+  const svg = sv('svg', { width: W, height: H, viewBox: `0 0 ${W} ${H}`, class: 'viz', role: 'img', 'aria-label': spec.title });
+  const bottom = m.t + rows.length * rowH;
+  ticks.forEach((v, i) => {
+    svg.append(sv('line', { x1: x(v), x2: x(v), y1: m.t, y2: bottom, class: i === 0 ? 'axis' : 'grid' }));
+    svg.append(sv('text', { x: x(v), y: bottom + 16, 'text-anchor': i === 0 ? 'start' : i === ticks.length - 1 ? 'end' : 'middle' }, tickFmt(fmt, v, max)));
+  });
+  rows.forEach((r, i) => {
+    const top = m.t + i * rowH, cy = top + 36;
+    const [mn, q1, md, q3, mx] = r.v;
+    const lines = [`중앙값 ${fmtV(fmt, md)}`, r.label, `Q1 ${fmtV(fmt, q1)} · Q3 ${fmtV(fmt, q3)}`, `최소 ${fmtV(fmt, mn)} · 최대 ${fmtV(fmt, mx)}`];
+    const g = sv('g', { class: 'col', tabindex: '0', 'data-tip': lines.join('\n'), 'aria-label': lines.join(', ') });
+    g.append(sv('rect', { x: m.l, y: top, width: iw, height: rowH, class: 'hit' }));
+    g.append(sv('text', { x: m.l + 4, y: top + 17, class: 'blabel' }, r.label));
+    g.append(sv('line', { x1: x(mn), x2: x(q1), y1: cy, y2: cy, class: 'whisk' }));
+    g.append(sv('line', { x1: x(q3), x2: x(mx), y1: cy, y2: cy, class: 'whisk' }));
+    g.append(sv('line', { x1: x(mn), x2: x(mn), y1: cy - 5, y2: cy + 5, class: 'whisk' }));
+    g.append(sv('line', { x1: x(mx), x2: x(mx), y1: cy - 5, y2: cy + 5, class: 'whisk' }));
+    g.append(sv('rect', { x: x(q1), y: cy - 8, width: Math.max(2, x(q3) - x(q1)), height: 16, rx: 4, class: `mark ${r.tone ? 't-' + r.tone : 't-v1'}` }));
+    g.append(sv('line', { x1: x(md), x2: x(md), y1: cy - 8, y2: cy + 8, class: 'med' }));
+    svg.append(g);
+  });
+  return svg;
+}
+
+/* ---------- 원문 증거 ---------- */
+function commonPrefix(a, b) { let i = 0; while (i < a.length && i < b.length && a[i] === b[i]) i++; return i; }
+function diffView(spec) {
+  const lines = el('div', { class: 'diff-lines' });
+  for (const ln of spec.lines) {
+    if (ln.more != null) { lines.append(el('div', { class: 'd-row d-more' }, el('span', { class: 'd-gut', text: '…' }), el('span', { class: 'd-txt', text: ln.more }))); continue; }
+    if (ln.same != null) { lines.append(el('div', { class: 'd-row d-same' }, el('span', { class: 'd-gut' }), el('code', { class: 'd-txt', text: ln.same }))); continue; }
+    const k = commonPrefix(ln.a, ln.b);
+    lines.append(el('div', { class: 'd-row d-a' }, el('span', { class: 'd-gut', text: spec.aTag }), el('code', { class: 'd-txt' }, ln.a.slice(0, k), el('mark', { text: ln.a.slice(k) }))));
+    lines.append(el('div', { class: 'd-row d-b' }, el('span', { class: 'd-gut', text: spec.bTag }), el('code', { class: 'd-txt' }, ln.b.slice(0, k), el('mark', { text: ln.b.slice(k) }))));
+  }
+  return el('div', { class: 'diff' }, spec.meta ? el('p', { class: 'diff-meta', text: spec.meta }) : null, lines);
+}
+function listdiff(spec) {
+  const col = (tag, list, other) => el('div', {},
+    el('h5', { text: tag }),
+    el('ol', {}, list.map((name, i) => {
+      const j = other.indexOf(name);
+      const moved = j !== i;
+      return el('li', { class: moved ? 'moved' : null },
+        el('span', { class: 'i', text: String(i + 1) }), el('span', { text: name }),
+        moved ? el('span', { class: 'mv', text: `다른 변형에서 ${j + 1}번째` }) : el('span'));
+    })));
+  return el('div', { class: 'ldiff' }, col(spec.aTag, spec.a, spec.b), col(spec.bTag, spec.b, spec.a));
+}
+function pairsView(spec) {
+  return el('div', { class: 'pairs' }, spec.pairs.map(p => el('div', { class: 'pair' },
+    el('p', { class: 'msg', text: p.a }),
+    el('div', { class: 'pair-gap' }, `${p.gap} 뒤 다시 질문`, el('span', { class: 'simbar', 'aria-hidden': 'true' }, el('i', { style: `width:${p.sim * 100}%` })), `유사도 ${p.sim.toFixed(2)}`),
+    el('p', { class: 'msg', text: p.b }))));
+}
+
+/* ---------- 표 보기 ---------- */
+function tableFor(spec) {
+  let head, rows, numCols = [];
+  const fmt = spec.fmt || 'int';
+  switch (spec.type) {
+    case 'hbar': {
+      const hasAside = spec.rows.some(r => r.aside);
+      head = ['항목', '값', ...(spec.threshold ? ['기준'] : []), ...(hasAside ? ['비고'] : [])];
+      numCols = [1];
+      rows = spec.rows.map(r => [r.label, fmtV(fmt, r.value), ...(spec.threshold ? [isBad(r.value, spec.threshold) ? '벗어남' : '이내'] : []), ...(hasAside ? [r.aside || ''] : [])]);
+      break;
+    }
+    case 'stackbar':
+      head = ['항목', ...spec.series.map(s => s.name), '합계'];
+      numCols = spec.series.map((_, i) => i + 1).concat(spec.series.length + 1);
+      rows = spec.rows.map(r => [r.label, ...r.segs.map(v => fmtV(fmt, v)), fmtV(fmt, sum(r.segs))]);
+      break;
+    case 'segbar': {
+      const total = sum(spec.parts.map(p => p.value));
+      head = ['구성', '값', '비중']; numCols = [1, 2];
+      rows = spec.parts.map(p => [p.name, fmtV(fmt, p.value), pctStr(p.value / total)]);
+      break;
+    }
+    case 'columns':
+      if (spec.bins[0].segs) {
+        head = ['구간', ...spec.series.map(s => s.name), '합계'];
+        numCols = spec.series.map((_, i) => i + 1).concat(spec.series.length + 1);
+        rows = spec.bins.map(b => [String(b.label).replace(/\n/g, ' '), ...b.segs.map(v => fmtV(fmt, v)), fmtV(fmt, sum(b.segs))]);
+      } else {
+        const hasN = spec.bins.some(b => b.n);
+        head = ['구간', '값', ...(hasN ? ['표본'] : [])]; numCols = hasN ? [1, 2] : [1];
+        rows = spec.bins.map(b => [String(b.label).replace(/\n/g, ' '), fmtV(fmt, b.value), ...(hasN ? [b.n || ''] : [])]);
+      }
+      break;
+    case 'line':
+      head = [spec.xLabel || 'x', '값']; numCols = [1];
+      rows = spec.points.map(p => [p.x, fmtV(fmt, p.y)]);
+      break;
+    case 'box':
+      head = ['유형', '최소', 'Q1', '중앙값', 'Q3', '최대']; numCols = [1, 2, 3, 4, 5];
+      rows = spec.rows.map(r => [r.label, ...r.v.map(v => fmtV(fmt, v))]);
+      break;
+    default: return null;
+  }
+  const table = el('table', {},
+    el('thead', {}, el('tr', {}, head.map((h, i) => el('th', { class: numCols.includes(i) ? 'num' : null, text: h })))),
+    el('tbody', {}, rows.map(r => el('tr', {}, r.map((c, i) => el('td', { class: numCols.includes(i) ? 'num' : null, text: c }))))));
+  return el('details', { class: 'fig-table' }, el('summary', { text: '표로 보기' }), el('div', { class: 'tbl-wrap' }, table));
+}
+
+/* ---------- 그림 틀 ---------- */
+const SVG_TYPES = { columns, line: lineChart, box: boxChart };
+const HTML_TYPES = { hbar, stackbar, segbar, diff: diffView, listdiff, pairs: pairsView };
+function mountSvg(host, draw) {
+  let lastW = 0;
+  new ResizeObserver(entries => {
+    const w = Math.floor(entries[0].contentRect.width);
+    if (w > 0 && Math.abs(w - lastW) > 1) { lastW = w; host.replaceChildren(draw(w)); }
+  }).observe(host);
+}
+function figure(spec, opts = {}) {
+  const fig = el('figure', { class: 'fig' + (spec.wide ? ' wide' : '') });
+  if (spec.title) fig.append(el('figcaption', { class: 'fig-head' }, el('h4', { text: spec.title }), spec.sub ? el('p', { class: 'fig-sub', text: spec.sub }) : null));
+  const body = el('div', { class: 'fig-body' });
+  if (SVG_TYPES[spec.type]) {
+    if (spec.series && spec.type === 'columns') fig.append(legend(spec.series.map((s, i) => ({ tone: 'c' + (i + 1), label: s.name }))));
+    mountSvg(body, w => SVG_TYPES[spec.type](spec, w));
+  } else body.append(HTML_TYPES[spec.type](spec));
+  fig.append(body);
+  if (spec.note) fig.append(el('p', { class: 'fig-note', text: spec.note }));
+  if (!opts.noTable) { const tb = tableFor(spec); if (tb) fig.append(tb); }
+  return fig;
+}
+
+/* =====================================================================
+   보고서 조립
+   ===================================================================== */
+const R = REPORT;
+const CAUSE = Object.fromEntries(R.causes.map(c => [c.id, c]));
+const SYMP = Object.fromEntries(R.symptoms.map(s => [s.id, s]));
+const isCard = c => (c.verdict === '해당' || c.verdict === '후보') && c.waste;
+let mode = 'report';
+
+function thrText(s) {
+  if (s.thresholdText) return s.thresholdText;
+  return `${s.dir === 'lower' ? '<' : '≥'} ${fmtV(s.fmt, s.threshold)}`;
+}
+function causeChip(id) {
+  const c = CAUSE[id];
+  const v = VERDICT[c.verdict];
+  return el('a', { class: `cchip ${v.cls}`, href: '#cause-' + id, 'data-cause': id, title: `${id} ${c.name} · ${c.verdict}`, 'aria-label': `${id} ${c.name}, ${c.verdict}` }, icon(v.icon), id);
+}
+
+function renderMast() {
+  const m = R.meta;
+  const items = [
+    ['분석 기간', `${m.period.from} – ${m.period.to} (${m.period.days}일)`],
+    ['대상 에이전트', m.agents.join(', ')],
+    ['Foundry 프로젝트', m.project],
+    ['Application Insights', m.appInsights],
+    ['모델', m.models],
+    ['데이터 원본', m.sources],
+    ['작성', `${m.date} · ${m.author}`],
+  ];
+  document.getElementById('top').append(
+    el('p', { class: 'kicker', text: 'Microsoft Foundry · Application Insights' }),
+    el('h1', { text: m.title }),
+    el('p', { class: 'mast-sub', text: `${m.customer} · ${m.service}` }),
+    el('dl', { class: 'mast-meta' }, items.map(([k, v]) => el('div', {}, el('dt', { text: k }), el('dd', { text: v })))),
+    ...(m.sample ? [el('p', { class: 'sample' }, icon('info'), el('span', { text: '예시 데이터로 채운 템플릿이다. 숫자와 이름은 실제 고객 값이 아니다. 채우는 방법은 페이지 맨 아래 "템플릿 채우는 법"에 있다.' }))] : []),
+  );
+}
+
+function section(id, no, title) {
+  return el('section', { class: 'sec', id: 'sec-' + id, 'aria-labelledby': 'h-' + id },
+    el('h2', { class: 'sec-h', id: 'h-' + id }, el('span', { class: 'sec-no', text: String(no) }), title));
+}
+
+function renderSummary() {
+  const m = R.meta;
+  const s = section('summary', 1, '요약');
+  s.append(el('ul', { class: 'lead' }, m.summary.map(t => el('li', { text: t }))));
+  s.append(el('dl', { class: 'scope' },
+    [['분석 기간 비용', '$' + NF.format(m.totalCost), ''], ['턴', NF.format(m.turns), ''], ['LLM 호출', NF.format(m.calls), ''], ['캐시율', pctStr(m.cacheRate), ''], ['고정 Input S_a', NF.format(m.fixedInput), 'tok']]
+      .map(([k, v, u]) => el('div', {}, el('dt', { text: k }), el('dd', {}, v, u ? el('span', { class: 'u', text: u }) : null)))));
+  const ranked = R.causes.filter(isCard).sort((a, b) => b.waste.usd - a.waste.usd);
+  const panel = el('div', { class: 'panel' });
+  panel.append(figure({
+    type: 'hbar', title: `원인별 낭비 추정 (분석 기간 ${m.period.days}일, USD)`,
+    sub: '원인끼리 같은 토큰을 겹쳐 셀 수 있어 합산하지 않는다. 항목을 누르면 3장의 상세로 이동한다.',
+    fmt: 'usd', labelWidth: '15rem', valueWidth: '8.5rem',
+    legend: [{ tone: 't-v1', label: '해당' }, { tone: 't-v1soft', label: '후보' }],
+    rows: ranked.map(c => ({
+      code: c.id, label: c.name, href: '#cause-' + c.id, causeId: c.id, value: c.waste.usd,
+      tone: c.verdict === '해당' ? 'v1' : 'v1soft',
+      aside: `비용의 ${pctStr(c.waste.usd / m.totalCost)}${c.waste.bound ? ' · 상한' : ''}`,
+    })),
+  }));
+  s.append(panel);
+  s.append(el('p', { class: 'prices' },
+    el('span', { text: '계산 전제 (예시 단가, USD / 1M tok):' }),
+    m.prices.map(p => el('span', {}, el('code', { text: p.model }), ` 입력 ${p.pin.toFixed(2)} · 캐시 ${p.pcache.toFixed(2)} · 출력 ${p.pout.toFixed(2)}`)),
+    el('span', {}, el('code', { text: 'P_eff' }), ` ${m.peff} (캐시율 ${pctStr(m.cacheRate)} 반영)`)));
+  return s;
+}
+
+function renderSymptoms() {
+  const s = section('symptoms', 2, '증상 점검');
+  const counts = {};
+  R.symptoms.forEach(x => { counts[x.status] = (counts[x.status] || 0) + 1; });
+  const parts = ['abnormal', 'normal', 'nodata', 'hold'].filter(k => counts[k]).map(k => `${SYM[k].label} ${counts[k]}개`);
+  s.append(el('p', { class: 'lede', text: `증상 ${R.symptoms.length}개 가운데 ${parts.join(', ')}다. 이상이 나온 증상에서 이어지는 원인만 3장에서 상세히 본다.` }));
+  const rows = R.symptoms.map(x => {
+    const base = { code: x.id, label: x.name, href: '#sym-' + x.id };
+    if (x.value == null || x.threshold == null) {
+      const chipText = x.status === 'abnormal' ? '이상 · 단계 비교로 판정' : x.status === 'nodata' ? `계측 부재 · ${x.note || ''}` : SYM[x.status].label;
+      return { ...base, chip: x.status, chipText, aside: x.display || x.thresholdText || null };
+    }
+    const sev = x.dir === 'lower' ? x.threshold / x.value : x.value / x.threshold;
+    return { ...base, value: sev, aside: `${fmtV(x.fmt, x.value)} · 기준 ${thrText(x)}` };
+  });
+  const sevMax = Math.max(2, ...rows.filter(r => r.value != null).map(r => r.value * 1.06));
+  const panel = el('div', { class: 'panel' });
+  panel.append(figure({
+    type: 'hbar', title: '증상별 기준 대비 배수',
+    sub: '막대 = 현재 값 ÷ 기준. 캐시 달성률처럼 낮을수록 나쁜 지표는 기준 ÷ 값으로 뒤집어, 모든 막대가 오른쪽일수록 나쁘다.',
+    fmt: 'x', labelWidth: '16.5rem', valueWidth: '10rem', max: sevMax,
+    threshold: { value: 1, dir: 'above', label: '기준 1×' },
+    rows,
+  }, { noTable: true }));
+  s.append(panel);
+  const table = el('table', { class: 'sym-table' },
+    el('thead', {}, el('tr', {}, ['ID', '증상', '지표', '현재 값', '기준', '상태', '이어지는 원인'].map((h, i) => el('th', { class: i === 3 ? 'num' : null, text: h })))),
+    el('tbody', {}, R.symptoms.map(x => {
+      const st = SYM[x.status];
+      return el('tr', { id: 'sym-' + x.id },
+        el('td', {}, el('span', { class: 'code', text: x.id })),
+        el('td', { text: x.name }),
+        el('td', { text: x.metric }),
+        el('td', { class: 'num', text: x.value != null ? fmtV(x.fmt, x.value) : (x.display || '—') }),
+        el('td', { text: thrText(x) }),
+        el('td', {}, el('span', { class: `chip-st ${st.cls}` }, icon(st.icon), st.label)),
+        el('td', {}, el('span', { class: 'chips' }, x.causes.map(causeChip))));
+    })));
+  s.append(el('div', { class: 'panel' }, el('div', { class: 'tbl-wrap' }, table)));
+  return s;
+}
+
+function causeCard(c, catalog) {
+  const cat = c.id[0];
+  const card = isCard(c);
+  const art = el('article', { class: 'cause' + (catalog && !card ? ' example' : ''), id: 'cause-' + c.id, tabindex: '-1', 'aria-labelledby': 'ch-' + c.id });
+  const status = el('div', { class: 'cause-status' }, verdictPill(c.verdict, catalog ? '이번 판정 · ' : ''));
+  if (card) status.append(el('p', { class: 'cause-waste' },
+    el('span', { class: 'lbl', text: '낭비 추정' }), el('strong', { text: fmtV('usd', c.waste.usd) }),
+    el('span', { class: 'share', text: `비용의 ${pctStr(c.waste.usd / R.meta.totalCost)}${c.waste.bound ? ' · 상한' : ''}` })));
+  art.append(el('header', { class: 'cause-head' },
+    el('div', { class: 'cause-title' }, el('span', { class: 'code big', text: c.id }),
+      el('div', {}, el('p', { class: 'cause-cat', text: `${cat} · ${R.categories[cat].name}` }), el('h3', { id: 'ch-' + c.id, text: c.name }))),
+    status));
+  if (c.from && c.from.length) art.append(el('p', { class: 'cause-from' }, el('span', { class: 'lbl', text: '발견 경로' }),
+    c.from.map(sid => el('a', { class: 'schip', href: '#sym-' + sid, text: `${sid} ${SYMP[sid].name}` }))));
+  if (card && c.finding) art.append(el('p', { class: 'finding', text: c.finding }));
+  else if (catalog) art.append(el('p', { class: 'finding example', text: `아래 그림은 이 원인이 해당할 때의 모습을 보여주는 예시다. 이번 판정 근거: ${c.basis || c.verdict}.` }));
+  art.append(el('p', { class: 'rule' }, el('b', { text: '판정 기준 ' }), c.rule));
+  const charts = c.charts || [];
+  const lone = charts.filter(ch => !ch.wide).length === 1;
+  if (charts.length) art.append(el('div', { class: 'figs' }, charts.map(ch => figure(lone && !ch.wide ? { ...ch, wide: true } : ch))));
+  if (card) {
+    const foot = el('div', { class: 'cause-foot' });
+    foot.append(el('div', {}, el('h4', { text: '낭비 추정 계산' }), el('code', { class: 'formula', text: c.waste.formula }), el('p', { class: 'inputs', text: c.waste.inputs })));
+    if (c.differential && c.differential.length) foot.append(el('div', {}, el('h4', { text: '다른 원인과의 감별·겹침' }), el('ul', {}, c.differential.map(t => el('li', { text: t })))));
+    art.append(foot);
+  }
+  return art;
+}
+
+function renderCausesInto(host) {
+  host.replaceChildren();
+  const list = el('div', { class: 'causes' });
+  if (mode === 'report') {
+    const cards = R.causes.filter(isCard).sort((a, b) => b.waste.usd - a.waste.usd);
+    const nHit = cards.filter(c => c.verdict === '해당').length;
+    host.append(el('p', { class: 'lede', text: `이상 증상에서 이어진 원인 가운데 해당 ${nHit}개와 후보 ${cards.length - nHit}개를 낭비 추정이 큰 순서로 싣는다. 나머지 원인의 판정 근거는 4장에 있고, 모든 원인의 그림 예시는 위쪽 "그림 카탈로그"에서 볼 수 있다.` }));
+    cards.forEach(c => list.append(causeCard(c, false)));
+  } else {
+    host.append(el('p', { class: 'lede', text: `원인 ${R.causes.length}개 전체의 그림이다. 이번 보고서에 카드로 나오지 않는 원인은 점선 테두리로 표시하고, 그 원인이 해당할 때 어떤 그림이 나오는지 예시 데이터로 보여준다.` }));
+    for (const L of Object.keys(R.categories)) {
+      list.append(el('div', { class: 'cat-head' }, el('span', { class: 'code', text: L }), el('h3', { text: R.categories[L].name }), el('p', { text: `키우는 항: ${R.categories[L].term}` })));
+      R.causes.filter(c => c.id[0] === L).forEach(c => list.append(causeCard(c, true)));
+    }
+  }
+  host.append(list);
+}
+
+function renderCauses() {
+  const s = section('causes', 3, '원인 상세');
+  const host = el('div', { id: 'causes-host', style: 'display:grid;gap:1.25rem' });
+  s.append(host);
+  renderCausesInto(host);
+  return s;
+}
+
+function renderScope() {
+  const s = section('scope', 4, '점검 범위');
+  s.append(el('p', { class: 'lede', text: `원인 ${R.causes.length}개 전체의 판정이다. 칸을 누르면 해당 원인의 상세나 그림 예시로 이동한다.` }));
+  const counts = {};
+  R.causes.forEach(c => { counts[c.verdict] = (counts[c.verdict] || 0) + 1; });
+  s.append(el('ul', { class: 'counts', 'aria-label': '판정별 개수' },
+    Object.keys(VERDICT).filter(v => counts[v]).map(v => el('li', { class: VERDICT[v].cls }, icon(VERDICT[v].icon), v, el('b', { text: String(counts[v]) })))));
+  const mx = el('div', { class: 'mx' });
+  for (const L of Object.keys(R.categories)) {
+    mx.append(el('div', { class: 'mx-row' },
+      el('div', { class: 'mx-cat' }, el('span', { class: 'code', text: L }), el('span', { text: R.categories[L].name })),
+      el('div', { class: 'mx-cells' }, R.causes.filter(c => c.id[0] === L).map(c => {
+        const v = VERDICT[c.verdict];
+        return el('a', { class: `mx-cell ${v.cls}`, href: '#cause-' + c.id, 'data-cause': c.id, 'aria-label': `${c.id} ${c.name}, ${c.verdict}` },
+          el('span', { class: 'mx-top' }, el('span', { class: 'code', text: c.id }), icon(v.icon)),
+          el('span', { class: 'mx-name', text: c.name }),
+          el('span', { class: 'mx-v', text: c.verdict + (isCard(c) ? ` · ${fmtV('usd', c.waste.usd)}` : '') }));
+      }))));
+  }
+  s.append(el('div', { class: 'panel' }, mx));
+  const rest = R.causes.filter(c => !isCard(c));
+  const table = el('table', { class: 'basis-table' },
+    el('thead', {}, el('tr', {}, ['원인', '판정', '근거'].map(h => el('th', { text: h })))),
+    el('tbody', {}, rest.map(c => el('tr', {},
+      el('td', {}, el('span', { class: 'chips' }, causeChip(c.id), el('span', { text: c.name }))),
+      el('td', {}, verdictPill(c.verdict)),
+      el('td', { text: c.basis || '' })))));
+  s.append(el('div', { class: 'panel' }, el('h3', { style: 'margin:0 0 .75rem;font-size:1rem', text: '카드가 없는 원인의 판정 근거' }), el('div', { class: 'tbl-wrap' }, table)));
+  return s;
+}
+
+function renderHowto() {
+  const types = [
+    ['hbar', '가로 막대. threshold(value, dir, label)를 넣으면 기준선과 초과 강조가 붙는다.', 'A1, A4, B1, B2, C2, D3, D4, E4, F1, F2, F4'],
+    ['stackbar', '누적 가로 막대. series와 rows[].segs.', 'B4, E1'],
+    ['segbar', '전체를 나눈 분할 막대. parts[].', 'B3'],
+    ['columns', '세로 막대·히스토그램. bins[], markers(at = 구간 단위 위치).', 'A3, A5, A6, C3, D1, D2, E3'],
+    ['line', '선 그래프. points[], threshold, annotations, vmarkers.', 'C1, C2'],
+    ['box', '상자 그림. rows[].v = [최소, Q1, 중앙값, Q3, 최대].', 'E2'],
+    ['diff · listdiff · pairs', '원문 증거. 프롬프트 차이, tool 순서 차이, 재질문 쌍.', 'A1, A2, F3'],
+  ];
+  return el('details', { class: 'howto' },
+    el('summary', { text: '템플릿 채우는 법' }),
+    el('div', { class: 'howto-body' },
+      el('p', {}, '모든 값은 이 파일 아래쪽 ', el('code', { text: '<script>' }), '의 ', el('code', { text: 'REPORT' }), ' 객체 하나에 있다. 진단 가이드의 쿼리 결과를 옮겨 넣고 저장하면 그림이 다시 그려진다.'),
+      el('ul', {},
+        el('li', {}, el('code', { text: 'meta' }), ': 머리말, 요약 문장, 비용·턴·호출 수, 단가. ', el('code', { text: 'sample: false' }), '로 바꾸면 예시 안내가 사라진다.'),
+        el('li', {}, el('code', { text: 'symptoms' }), ': 증상 12개. ', el('code', { text: 'status' }), '는 abnormal, normal, nodata, hold 중 하나. 수치 기준이 있으면 value, threshold, dir(higher | lower)를 넣는다.'),
+        el('li', {}, el('code', { text: 'causes' }), ': 원인 25개. ', el('code', { text: 'verdict' }), '는 해당, 후보, 비해당, 계측 부재, 판정 보류, 미점검 중 하나. 해당·후보이면서 waste가 있으면 3장 카드가 되고 1장 순위에 들어간다. 나머지는 basis가 4장 표에 나온다.'),
+        el('li', {}, el('code', { text: 'charts' }), ': 원인마다 그림 1–2개. 아래 표의 type 중 하나를 고른다.')),
+      el('div', { class: 'tbl-wrap' }, el('table', {},
+        el('thead', {}, el('tr', {}, ['type', '내용', '쓰는 원인'].map(h => el('th', { text: h })))),
+        el('tbody', {}, types.map(r => el('tr', {}, el('td', {}, el('code', { text: r[0] })), el('td', { text: r[1] }), el('td', { text: r[2] }))))))));
+}
+
+function setMode(next) {
+  if (next === mode) return;
+  mode = next;
+  document.getElementById('mode-report').setAttribute('aria-pressed', String(mode === 'report'));
+  document.getElementById('mode-catalog').setAttribute('aria-pressed', String(mode === 'catalog'));
+  renderCausesInto(document.getElementById('causes-host'));
+}
+
+function boot() {
+  renderMast();
+  const main = document.getElementById('report');
+  main.append(renderSummary(), renderSymptoms(), renderCauses(), renderScope(), renderHowto());
+  document.getElementById('mode-report').addEventListener('click', () => setMode('report'));
+  document.getElementById('mode-catalog').addEventListener('click', () => {
+    setMode('catalog');
+    document.getElementById('sec-causes').scrollIntoView({ behavior: REDUCED ? 'auto' : 'smooth' });
+  });
+  document.addEventListener('click', e => {
+    const a = e.target.closest('[data-cause]');
+    if (!a) return;
+    e.preventDefault();
+    const id = a.getAttribute('data-cause');
+    if (!document.getElementById('cause-' + id)) setMode('catalog');
+    const card = document.getElementById('cause-' + id);
+    if (!card) return;
+    card.scrollIntoView({ behavior: REDUCED ? 'auto' : 'smooth', block: 'start' });
+    card.focus({ preventScroll: true });
+    card.classList.add('flash');
+    setTimeout(() => card.classList.remove('flash'), 1600);
+  });
+}
+boot();
+</script>

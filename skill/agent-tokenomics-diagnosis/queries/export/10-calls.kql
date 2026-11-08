@@ -1,0 +1,38 @@
+//! name: calls
+//! columns: TimeGenerated,OperationId,SpanId,ParentId,Op,Agent,ConvId,Model,RequestModel,InTok,CacheTok,WriteTok,OutTok,ReasonTok,Finish,Status,MaxTok,ReasonLevel,Compacted,Endpoint,ErrorType,Success,ResultCode,DurationMs
+//! sensitive: false
+// LLM 호출 1건 = 1행. 비용 식과 섹션 3 지표의 기본 입력이다.
+// CallIdx와 Cost는 여기서 계산하지 않는다. 일 단위로 쪼갠 파일이 턴을 가를 수 있어서,
+// 턴 안 순번은 전체 기간을 모아 로컬에서 계산한다(queries/views.sql).
+let T0 = datetime(2026-11-01);
+let T1 = datetime(2026-11-02);
+union AppDependencies, AppRequests
+| where TimeGenerated >= T0 and TimeGenerated < T1
+| extend Op = tostring(Properties["gen_ai.operation.name"])
+| where Op in ("chat", "text_completion", "generate_content")
+| project
+    TimeGenerated,
+    OperationId,
+    SpanId       = Id,
+    ParentId,
+    Op,
+    Agent        = tostring(Properties["gen_ai.agent.name"]),
+    ConvId       = tostring(Properties["gen_ai.conversation.id"]),
+    Model        = tostring(Properties["gen_ai.response.model"]),
+    RequestModel = tostring(Properties["gen_ai.request.model"]),
+    InTok        = tolong(Properties["gen_ai.usage.input_tokens"]),
+    CacheTok     = coalesce(tolong(Properties["gen_ai.usage.cache_read.input_tokens"]), 0),
+    WriteTok     = coalesce(tolong(Properties["gen_ai.usage.cache_write.input_tokens"]),
+                            tolong(Properties["gen_ai.usage.cache_creation.input_tokens"]), 0),
+    OutTok       = tolong(Properties["gen_ai.usage.output_tokens"]),
+    ReasonTok    = coalesce(tolong(Properties["gen_ai.usage.reasoning.output_tokens"]), 0),
+    Finish       = tostring(Properties["gen_ai.response.finish_reasons"]),
+    Status       = tostring(Properties["gen_ai.response.status"]),
+    MaxTok       = toint(Properties["gen_ai.request.max_tokens"]),
+    ReasonLevel  = tostring(Properties["gen_ai.request.reasoning.level"]),
+    Compacted    = tostring(Properties["gen_ai.conversation.compacted"]),
+    Endpoint     = coalesce(tostring(Properties["server.address"]), tostring(Target)),
+    ErrorType    = tostring(Properties["error.type"]),
+    Success,
+    ResultCode,
+    DurationMs

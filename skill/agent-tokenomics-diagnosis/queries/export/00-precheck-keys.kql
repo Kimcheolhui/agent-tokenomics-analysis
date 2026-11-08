@@ -1,0 +1,16 @@
+//! name: precheck-keys
+//! columns: Key,Spans
+//! sensitive: false
+// chat span에 실제로 기록되는 속성 키와 그 키가 들어 있는 span 수.
+// 이 결과로 cache_read, reasoning, conversation.id 수집 여부를 확인한다.
+// 키가 없으면 그 키를 쓰는 지표는 산출할 수 없고 "계측 부재"로 기록한다.
+// 추출 전에 한 번 돌린다. 나머지 사전 점검 항목은 백로그 3번에서 다룬다.
+let T0 = datetime(2026-11-01);
+let T1 = datetime(2026-11-02);
+AppDependencies
+| where TimeGenerated >= T0 and TimeGenerated < T1
+| where tostring(Properties["gen_ai.operation.name"]) == "chat"
+| take 500
+| mv-expand Key = bag_keys(Properties)
+| summarize Spans = count() by Key = tostring(Key)
+| order by Spans desc

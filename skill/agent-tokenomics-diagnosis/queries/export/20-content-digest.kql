@@ -1,0 +1,34 @@
+//! name: content_digest
+//! columns: TimeGenerated,TraceId,SpanId,AgentName,SysChars,SysHash,SysHeadHash,ToolDefsChars,ToolDefsHash,ToolCount,ToolNames,InChars,InHash,OutChars,OutHash,ArgsChars,ArgsHash,ResultChars,ResultHash
+//! sensitive: false
+// AppGenAIContent 레코드 1건 = 1행. 원문은 내리지 않고 해시와 길이만 내린다.
+// A1은 변형 수, A2는 원문·이름 집합 변형, C2는 결과 길이, D1은 인자 해시, D3는 출력 해시만 쓴다.
+// 고객 프롬프트와 tool 결과가 로컬에 남지 않고, CSV 크기도 작게 유지된다.
+// ToolNames는 ToolDefinitions에 나온 순서를 그대로 둔다. A2가 순서 변형을 보기 때문이다.
+// 순서를 무시한 이름 집합 해시는 로컬에서 정렬해 만든다(queries/views.sql).
+// 증거용 원문은 90-content-by-span.kql로 필요한 SpanId만 따로 뽑는다.
+let T0 = datetime(2026-11-01);
+let T1 = datetime(2026-11-02);
+AppGenAIContent
+| where TimeGenerated >= T0 and TimeGenerated < T1
+| extend ToolNamesArr = extract_all(@'"name"\s*:\s*"([^"]+)"', tostring(ToolDefinitions))
+| project
+    TimeGenerated,
+    TraceId,
+    SpanId,
+    AgentName,
+    SysChars      = strlen(SystemInstructions),
+    SysHash       = iff(isempty(SystemInstructions), "", hash_sha256(SystemInstructions)),
+    SysHeadHash   = iff(isempty(SystemInstructions), "", hash_sha256(substring(SystemInstructions, 0, 4000))),
+    ToolDefsChars = strlen(ToolDefinitions),
+    ToolDefsHash  = iff(isempty(ToolDefinitions), "", hash_sha256(ToolDefinitions)),
+    ToolCount     = coalesce(array_length(ToolNamesArr), 0),
+    ToolNames     = strcat_array(ToolNamesArr, "|"),
+    InChars       = strlen(InputMessages),
+    InHash        = iff(isempty(InputMessages), "", hash_sha256(InputMessages)),
+    OutChars      = strlen(OutputMessages),
+    OutHash       = iff(isempty(OutputMessages), "", hash_sha256(OutputMessages)),
+    ArgsChars     = strlen(ToolCallArguments),
+    ArgsHash      = iff(isempty(ToolCallArguments), "", hash_sha256(ToolCallArguments)),
+    ResultChars   = strlen(ToolCallResult),
+    ResultHash    = iff(isempty(ToolCallResult), "", hash_sha256(ToolCallResult))

@@ -1,0 +1,2 @@
+Agent,STok,Method,Note
+support-router,0,1,"S_a 측정값. Method는 측정법 1(실험 호출) / 2(원문 토큰화) / 3(하한 근사)"

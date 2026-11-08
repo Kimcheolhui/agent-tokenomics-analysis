@@ -1,0 +1,11 @@
+{
+  "title": "토큰 비용 진단 보고서",
+  "customer": "(고객명)",
+  "service": "(서비스 이름)",
+  "project": "(Foundry 프로젝트 이름)",
+  "appInsights": "(Application Insights 이름 (workspace: Log Analytics 이름))",
+  "models": "(사용 모델과 배포 유형. 예: gpt-5.4 (Global Standard))",
+  "sources": "AppDependencies, AppRequests, AppGenAIContent(해시·길이 요약)",
+  "author": "(작성자 · 직책)",
+  "date": "YYYY-MM-DD"
+}
