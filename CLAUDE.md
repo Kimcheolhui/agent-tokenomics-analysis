@@ -16,6 +16,13 @@
 | `queries/views.sql` | 로컬 분석 기본 뷰. 가이드 "공통 쿼리 정의"에 대응한다 | — |
 | `scripts/export.py` | az CLI 추출. 하루 단위 파일로 내린다 | — |
 | `config/` | 모델 단가·캐시 파라미터와 에이전트별 S_a. 고객마다 채운다 | — |
+| `config/thresholds.csv` | 판정 기준(judge)과 정의용 매개변수(param). "임시"로 적힌 값은 가이드에 수치가 없어 정한 값이다 | — |
+| `queries/metrics/*.sql` | 원인별 지표 SQL 27개 파일, 61개 쿼리. 파일 ID는 가이드의 원인 ID를 따른다 | — |
+| `scripts/` | `export.py`(추출), `run_metrics.py`(지표), `build_report.py`(보고서), `validate_report.py`, `build_skill.py`, `gen_synthetic.py`(합성 데이터) | — |
+| `docs/data-contract.md`, `report-schema.md`, `build-mapping.md`, `metrics-notes.md` | CSV 스키마, REPORT 스키마, 지표 → REPORT 대응과 `review.json`, 가이드와 SQL이 다른 곳 | — |
+| `docs/roadmap.md` | skill 완성까지의 단계와 설계 결정 | — |
+| `skill/agent-tokenomics-diagnosis/` | 완성된 Agent skill. `SKILL.md`만 직접 편집하고 나머지는 `scripts/build_skill.py`로 생성한다 | — |
+| `tests/e2e.py` | 합성 데이터로 skill 스크립트를 처음부터 끝까지 검증한다 | — |
 
 진단은 Log Analytics에서 CSV를 한 번 내린 뒤 로컬에서 산출한다. 쿼리를 매번 실행하지 않는다. 가이드 섹션 3의 KQL은 아직 본문에 인라인으로 남아 있고, 분리는 백로그 5번에서 다룬다.
 
@@ -66,6 +73,18 @@
 - 데이터는 파일 아래쪽 `<script>`의 `REPORT` 객체 하나에 있다. 필드 설명은 페이지 맨 아래 "템플릿 채우는 법"에 있다. 그림 type: `hbar`, `stackbar`, `segbar`, `columns`, `line`, `box`, `diff`, `listdiff`, `pairs`.
 - 단가(`meta.prices`)와 모든 수치는 예시 값이다.
 
+## 실행 방법
+
+```bash
+python3 scripts/export.py --workspace <GUID> --from 2026-10-20 --to 2026-11-03      # 추출
+python3 scripts/run_metrics.py --root . --out out/metrics.json                      # 지표
+python3 scripts/build_report.py --metrics out/metrics.json --root . --out out/report.html
+python3 tests/e2e.py                                                                # 종단 검증 (duckdb 필요)
+python3 scripts/build_skill.py                                                      # skill 폴더 재생성 (--check로 동기화 확인)
+```
+
+`scripts/`나 `queries/`를 고친 뒤에는 `build_skill.py`를 다시 돌린다. `tests/e2e.py`가 skill 폴더와 원본이 다르면 실패한다.
+
 ## 남은 일과 열린 질문
 
 - KQL은 실제 고객 데이터로 실행해 보지 않았다. 먼저 공통 전제의 "속성 키 확인" 쿼리로 `cache_read`, `reasoning`, `conversation.id` 키가 쌓이는지 확인한다.
@@ -73,6 +92,10 @@
 - `gen_ai.response.finish_reasons`의 tool 호출 값을 `tool_calls`로 가정했다. 실제 값을 확인해야 한다.
 - 턴 1개 = trace 1개 가정을 고객 앱에서 확인해야 한다.
 - gen_ai 속성은 OTel에서 아직 Development 단계라 이름이 바뀔 수 있다(예: `cache_creation` → `cache_write`).
+- **추출 KQL 9개는 실제 Log Analytics에서 실행해 보지 않았다.** DuckDB 쪽(뷰·지표 SQL·빌더)은 합성 데이터로만 검증했다. 합성 데이터는 내가 심은 문제만 검증하며, 실제 텔레메트리의 모양과 다를 수 있다.
+- `config/thresholds.csv`에서 "임시"로 표시한 기준 11개는 가이드에 수치가 없어 정했다. `e4_trunc_rate`는 합성 데이터의 잘림 비율(약 1%)이 기준 바로 아래라서 0.01에서 0.005로 낮췄다. 근거가 약하므로 고객 데이터로 보정한다.
+- 가이드와 SQL이 다른 정의를 쓰는 곳 7개는 `docs/metrics-notes.md`에 있다. 특히 D4 전달 비율은 가이드 정의로는 1에 도달할 수 없어서 `PassRatioVar`를 추가했고, 가이드의 해당 정의를 고칠지 정해야 한다.
+- 원본 가이드(`docs/diagnosis-guide.md`)의 KQL은 인라인으로 남아 있고 SQL과 따로 있다. 둘이 어긋나지 않게 하려면 한쪽을 기준으로 정해야 한다.
 
 ## 작성 규칙
 

@@ -32,14 +32,14 @@ Log Analytics ──export.py──▶ data/*.csv ──views.sql──▶ DuckD
 
 ## 단계
 
-| # | 단계 | 산출물 | 백로그 | 끝났다고 볼 조건 |
-| --- | --- | --- | --- | --- |
-| 1 | 가이드에 사전 점검 게이트와 S_a 선행 순서 반영 | `docs/diagnosis-guide.md` 수정 | 3, 4 | 진단 흐름이 점검 → S_a → 지표 순서이고, S_a를 쓰는 8곳에 표시가 있다 |
-| 2 | 섹션 3 지표를 로컬 SQL로 이전 | `queries/metrics/*.sql`, `scripts/run_metrics.py`, `config/thresholds.csv` | 6 | 25개 원인의 T 지표가 합성 데이터로 산출된다 |
-| 3 | REPORT 스키마와 검증기 | `docs/report-schema.md`, `scripts/validate_report.py` | 2 | 템플릿의 예시 데이터가 검증을 통과한다 |
-| 4 | 지표 → REPORT 빌더 | `scripts/build_report.py` | — | metrics.json에서 `report.html`이 만들어진다 |
-| 5 | Skill 조립 | `skill/agent-tokenomics-diagnosis/` | 5 | SKILL.md 본문이 500줄 이하이고 참조 파일이 분할되어 있다 |
-| 6 | 종단 검증 | `scripts/gen_synthetic.py`, 검증 기록 | — | 심어 둔 문제가 보고서에서 `후보` 이상으로 잡힌다 |
+| # | 단계 | 산출물 | 백로그 | 끝났다고 볼 조건 | 상태 |
+| --- | --- | --- | --- | --- | --- |
+| 1 | 가이드에 사전 점검 게이트와 S_a 선행 순서 반영 | `docs/diagnosis-guide.md` 수정 | 3, 4 | 진단 흐름이 점검 → S_a → 지표 순서이고, S_a를 쓰는 8곳에 표시가 있다 | 끝남 |
+| 2 | 섹션 3 지표를 로컬 SQL로 이전 | `queries/metrics/*.sql`, `scripts/run_metrics.py`, `config/thresholds.csv` | 6 | 25개 원인의 T 지표가 합성 데이터로 산출된다 | 끝남 |
+| 3 | REPORT 스키마와 검증기 | `docs/report-schema.md`, `scripts/validate_report.py` | 2 | 템플릿의 예시 데이터가 검증을 통과한다 | 끝남 |
+| 4 | 지표 → REPORT 빌더 | `scripts/build_report.py` | — | metrics.json에서 `report.html`이 만들어진다 | 끝남 |
+| 5 | Skill 조립 | `skill/agent-tokenomics-diagnosis/` | 5 | SKILL.md 본문이 500줄 이하이고 참조 파일이 분할되어 있다 | 끝남 |
+| 6 | 종단 검증 | `scripts/gen_synthetic.py`, 검증 기록 | — | 심어 둔 문제가 보고서에서 `후보` 이상으로 잡힌다 | 끝남 (`tests/e2e.py`) |
 
 단계마다 커밋한다. origin에는 push하지 않는다.
 

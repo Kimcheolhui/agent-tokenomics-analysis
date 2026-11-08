@@ -14,7 +14,11 @@ CSV 스키마를 계약으로 정했다. 추출 수단 두 가지가 같은 스�
 
 검증 상태: `views.sql`은 합성 CSV로 실행해 확인했다. 검증 중에 하위 에이전트 오귀속(가이드 B1·D4의 주의사항)을 막는 `call_owner` 뷰를 추가했다. **추출 KQL 9개는 실제 Log Analytics에서 실행해 보지 않았다.** `AppGenAIContent` 컬럼명과 `AppRequests` union 동작을 고객 환경에서 확인해야 한다.
 
-## 2. REPORT 객체 스키마 분리
+## 2. REPORT 객체 스키마 분리 — 끝남 (2026-11-09)
+
+`docs/report-schema.md`와 `scripts/validate_report.py`를 만들었다. 템플릿 예시 데이터가 검증을 통과하고, 일부러 깨뜨린 보고서의 결함 9개를 모두 잡는다. 지표 → REPORT 대응은 `docs/build-mapping.md`에 있다.
+
+원래 항목:
 
 지금 `REPORT` 필드 설명은 보고서 HTML 맨 아래 `<details>`의 산문과 CLAUDE.md 요약에만 있다. Agent가 값을 채우려면 필수 키를 기계가 읽을 형태로 봐야 한다.
 
@@ -51,7 +55,11 @@ A 범주의 지표와 낭비 추정은 대부분 3-B에서 측정한 S_a를 입�
 - 측정법 3(턴 첫 호출 InTok 1백분위수)만 쓸 수 있는 경우의 오차를 적는다. 하한 근사여서 낭비 추정이 낮게 나온다.
 - **끝**: 진단 흐름에 S_a 측정이 선행 단계로 들어가고, S_a를 쓰는 쿼리마다 그 사실이 적혀 있다.
 
-## 5. Skill 구조 설계와 작성
+## 5. Skill 구조 설계와 작성 — 끝남 (2026-11-09)
+
+`skill/agent-tokenomics-diagnosis/`를 만들었다. `SKILL.md`(180줄)만 직접 편집하고 나머지는 `scripts/build_skill.py`가 원본에서 생성한다. 가이드는 `references/`에 범주별(A–F)로 쪼갰다. 종단 검증은 `tests/e2e.py`다. 가이드 본문의 KQL 블록은 `references/catalog-*.md`에 그대로 남겼다. 가이드 원본(`docs/diagnosis-guide.md`)에서 KQL을 파일 참조로 바꾸는 일은 하지 않았다. 가이드와 SQL의 정의가 갈라진 곳은 `docs/metrics-notes.md`에 있다.
+
+원래 항목:
 
 가이드 본문이 1,114줄 76KB다. `SKILL.md` 하나에 넣으면 호출마다 전체가 컨텍스트에 올라간다. 토큰 최적화를 다루는 skill이 컨텍스트를 낭비하게 된다.
 
