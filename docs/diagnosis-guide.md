@@ -179,6 +179,7 @@ let Content = AppGenAIContent | where TimeGenerated > T0;
 - Cacheable(x): 캐시 가능한 최대 토큰. x가 모델의 MinTok 미만이면 0이고, Round128 모델(GPT-5.5 이하)은 128 단위로 내림하며, 그 외 모델은 x를 그대로 쓴다. ([Learn](https://learn.microsoft.com/en-us/azure/foundry/openai/how-to/prompt-caching))
 - P\_eff: 실효 Input 단가 = (1 − r) × P\_in + r × P\_cache. r은 해당 에이전트의 캐시율(Σ CacheTok ÷ Σ InTok)이다. 고정 Input처럼 매 호출 반복되는 토큰의 낭비를 추정할 때 쓴다.
 - 판정 기준의 수치는 초기값이다. 고객 데이터의 분포를 보고 보정한다.
+- 수치 없이 "낮으면", "높으면"으로 적은 판정은 근거 없는 수치를 정하지 않는다. 데이터 안에 비교할 기준 집단이 있으면(A3, A5, A6, D1) 단측 검정(유의수준 0.01)으로 차이가 우연으로 보기 어려운지만 보고, 크기는 낭비 추정으로 보인다. "반복되면"은 2건 이상으로 읽는다. 기준 집단도 없으면(D2, D3, F3) 지표 값을 기록하고 \[C\]·\[S\] 확인으로 판정한다.
 
 ## 1. 문제 범주 개요
 
@@ -360,7 +361,7 @@ Calls
 ```
 
 - **판정**
-  - 축소 이벤트가 있고 HitAfterShrink가 HitNormal보다 크게 낮으면 A3로 판정한다.
+  - 축소 이벤트가 있고 HitAfterShrink가 HitNormal보다 낮으면(단측 검정) A3 후보로 올린다. \[C\]로 편집 지점을 확인해 A3로 판정한다.
   - 턴 경계마다 축소가 생기면, 이전 턴의 tool 결과나 중간 메시지를 이력에서 빼는 구조다. 이 경우 다음 턴 첫 호출은 고정부까지만 히트한다.
   - 축소 없이 CallIdx별 달성률만 떨어지면 A1(재렌더링)이나 A2다.
 - **낭비 추정**: Σ(축소 이벤트) \[Cacheable(편집 지점 이전 공유 길이) − CacheTok\] × (P\_in − P\_cache). 공유 길이는 \[C\] `InputMessages`를 비교해 구한다. 편집으로 줄어든 Input Σ(PrevIn − InTok)도 함께 기록해야 순효과를 판단할 수 있다.
@@ -415,7 +416,7 @@ Calls
 ```
 
 - **판정**
-  - "보존 시간 안" 구간의 히트율은 높은데 그 밖의 구간에서 크게 낮아지면 A5로 판정한다.
+  - "보존 시간 밖" 구간의 히트율이 "보존 시간 안" 구간보다 낮으면(단측 검정) A5로 판정한다.
   - "보존 시간 안" 구간부터 히트율이 낮으면 A1, A2, A6을 확인한다.
 - **낭비 추정**: Σ(보존 시간 밖 첫 호출) Cacheable(S\_a) × (P\_in − P\_cache) × ("보존 시간 안" 히트율 − 해당 구간 히트율).
 
@@ -448,8 +449,8 @@ Calls
 ```
 
 - **판정**
-  - 한 에이전트가 여러 엔드포인트를 쓰고 엔드포인트별 히트율이 다르면 분산으로 판정한다. 리전·배포 간 공유 여부는 문서에 명시되지 않았으므로 이 실측값으로 판단한다.
-  - RpmLimit을 넘는 구간에서 히트율이 떨어지면 쏠림으로 판정한다.
+  - 한 에이전트가 여러 엔드포인트를 쓰고 최저 엔드포인트의 히트율이 최고 엔드포인트보다 낮으면(단측 검정) 분산으로 판정한다. 리전·배포 간 공유 여부는 문서에 명시되지 않았으므로 이 실측값으로 판단한다.
+  - RpmLimit을 넘는 구간의 히트율이 RpmLimit 이하 구간보다 낮으면(단측 검정) 쏠림으로 판정한다.
 - **낭비 추정**: Σ(해당 구간 호출) Cacheable(S\_a) × (기준 구간 히트율 − 해당 구간 히트율) × (P\_in − P\_cache).
 
 ## B. 고정 Input 비대
@@ -458,7 +459,7 @@ Calls
 
 ### S\_a를 쓰는 지점
 
-S\_a는 A 범주와 B 범주의 지표 대부분이 입력으로 받는다. 아래 지점은 S\_a 없이 산출할 수 없으므로 3-B 측정을 먼저 한다.
+S\_a는 A 범주와 B 범주의 지표 대부분과 D4가 입력으로 받는다. 아래 지점은 S\_a 없이 산출할 수 없으므로 3-B 측정을 먼저 한다.
 
 | 지점 | S\_a를 쓰는 방식 |
 | --- | --- |
@@ -470,6 +471,7 @@ S\_a는 A 범주와 B 범주의 지표 대부분이 입력으로 받는다. 아�
 | A6 | 낭비 추정 Cacheable(S\_a) |
 | B 공통: 고정 Input 비용 비중 | S\_a × LLM 호출 수 × P\_eff |
 | B4 | 하위 에이전트와 상위 에이전트의 S\_a 비교, 낭비 추정 |
+| D4 | 위임 시 전달 비율의 분자에서 S\_sub, 분모에서 S\_parent를 뺀다 |
 
 S\_a를 구하는 방법마다 정확도와 준비물이 다르다.
 
@@ -762,7 +764,7 @@ Spans
 
 점수 임계값(위 예시는 0.5)은 검색 엔진의 점수 척도에 맞춰 바꾼다. BM25, 벡터 유사도, semantic reranker의 척도가 서로 다르다.
 
-- **판정**: 검색당 결과 토큰이 크고, 저점수 문서 비율이나 턴 내 중복이 높으면 C3로 판정한다. 결과가 크더라도 대부분 고점수이고 응답에 인용되면 정상이다.
+- **판정**: 검색당 결과 토큰이 크고, 저점수·중복 문서 비율이 0.5 이상이면(고점수 문서가 과반이 아니면) C3 후보로 올린다. 결과가 크더라도 대부분 고점수이고 응답에 인용되면 정상이다.
 - **낭비 추정**: (저점수 + 중복 문서 토큰) × 이후 남은 호출 수 × P\_eff.
 
 ## D. 호출 구조
@@ -810,7 +812,7 @@ content가 없으면 \[T\] 근사로, 한 턴에서 같은 tool을 3회 이상 �
 - **판정**
   - 꼬리 턴 비용 비중이 0.15 이상이면, 호출 수 상위 5% 턴이 균등 분배 비중(5%)의 3배 넘는 비용을 차지하는 것이므로 꼬리 턴을 샘플로 연다(초기값). 에이전트 토큰 사용은 원래 꼬리가 길고 같은 작업도 실행마다 크게 달라서, 꼬리가 차지하는 비용을 기준으로 삼는다([Bai et al., 2026](https://arxiv.org/pdf/2604.22750)).
   - MaxN이 프레임워크의 최대 반복 횟수와 같은 턴이 있으면 반복 상한에 걸린 것이므로 바로 D1로 확정한다.
-  - 꼬리 턴에서 중복 tool 호출 비율이 높으면 D1로 판정한다.
+  - 꼬리 턴의 중복 tool 호출 비율이 나머지 턴보다 높으면(단측 검정) D1로 판정한다.
   - 꼬리 비율(p95 ÷ p50)은 분포 모양을 해석할 때 쓴다.
   - 꼬리 턴에 tool 실패가 많으면 F1, LLM 오류가 많으면 F2를 본다.
 - **낭비 추정**: Σ(중복 tool 호출) 그 결과를 처리한 다음 LLM 호출의 비용. 간이식은 꼬리 턴 비용 − 꼬리 턴 수 × 턴 비용 중앙값이다.
@@ -837,7 +839,7 @@ Calls
   by Agent
 ```
 
-- **판정**: 라운드당 tool 수가 1에 가깝고 순차 연쇄 턴이 많은데, \[C\]로 보니 연속 tool이 서로의 결과를 인자로 쓰지 않으면 D2로 판정한다. 의존 관계가 있으면 정상이다.
+- **판정**: 라운드당 tool 수가 1에 가깝고 순차 연쇄 턴이 있는데, \[C\]로 보니 연속 tool이 서로의 결과를 인자로 쓰지 않으면 D2로 판정한다. 의존 관계가 있으면 정상이다. 순차 연쇄 턴 비율의 수치 기준은 두지 않는다. 비율과 낭비 상한을 기록하고 \[C\] 확인 전까지 판정을 보류한다.
 - **낭비 추정**: 연쇄 길이 k인 턴마다 (k − 1) × 해당 라운드들의 평균 InTok × P\_eff.
 
 ### D3. 결정적 단계의 LLM 처리
@@ -867,7 +869,7 @@ Calls
 | extend OutputDiversity = round(1.0 * DistinctOutputs / ShortCalls, 3)
 ```
 
-- **판정**: 짧은 출력 호출의 비용 비중이 의미 있고 출력 다양성이 낮으면(소수의 레이블로 수렴하면) D3로 판정한다. 그 호출이 상위 모델이면 E1과 겹친다.
+- **판정**: 짧은 출력 호출의 비용 비중이 의미 있고 출력 다양성이 낮으면(출력 종류가 몇 개의 레이블뿐이면) D3로 판정한다. 비용 비중과 다양성의 수치 기준은 두지 않는다. 두 값을 기록하고 \[S\]로 규칙 처리가 가능한 단계인지 확인하기 전까지 판정을 보류한다. 그 호출이 상위 모델이면 E1과 겹친다.
 - **낭비 추정**: 해당 호출의 비용 전체. 규칙으로 대체할 수 있다고 볼 때의 상한이다.
 
 ### D4. 에이전트 간 컨텍스트 중복
@@ -875,12 +877,13 @@ Calls
 - **정의**: 상위 에이전트가 하위 에이전트에 전체 이력과 이전 tool 결과를 그대로 넘긴다. 또는 하위 에이전트의 긴 응답 전체를 다시 Input으로 받는다.
 - **확인 방법**: \[T\] 루트가 아닌 `invoke_agent` span으로 하위 에이전트 실행을 찾는다. 하위 첫 호출 InTok과 위임 직전 상위 호출 InTok을 비교한다. \[C\] 실제로 전달된 메시지를 확인한다.
 - **지표**
-  - 위임 시 전달 비율 = (하위 첫 호출 InTok − S\_sub) ÷ 위임 직전 상위 호출 InTok
+  - 위임 시 전달 비율 = (하위 첫 호출 InTok − S\_sub) ÷ (위임 직전 상위 호출 InTok − S\_parent). 분모는 상위 호출의 가변 컨텍스트(이력, tool 결과, 사용자 입력)다. 하위의 고정 Input과 상위의 고정 Input을 양쪽에서 빼므로 상위 가변 컨텍스트를 모두 넘기면 1이 된다.
   - 하위 응답 반입 크기 = 하위 실행 직후 상위 다음 호출의 ΔIn(C2 정의)
 
-**쿼리: 위임 시 Input 전달량.** 하위 에이전트의 첫 호출 InTok과 위임 직전 상위 에이전트 호출의 InTok을 짝지어 비교한다. 상위 이력이 하위로 통째로 넘어가는지(D4) 확인한다.
+**쿼리: 위임 시 Input 전달량.** 하위 에이전트의 첫 호출 InTok과 위임 직전 상위 에이전트 호출의 InTok을 짝지어 비교한다. 양쪽에서 S\_a를 빼고 전달 비율을 구해 상위 이력이 하위로 통째로 넘어가는지(D4) 확인한다.
 
 ```kusto
+let S = datatable(Agent:string, STok:long) [ "<에이전트명>", 0 ];   // 측정법 1–3으로 구한 S_a
 let Roots = Spans | where Op == "invoke_agent"
     | summarize arg_min(TimeGenerated, Id) by OperationId | project OperationId, RootSpanId = Id;
 let SubAgentSpans = Spans | where Op == "invoke_agent"
@@ -893,19 +896,24 @@ let SubFirst = Calls
 let ParentCalls = Calls
     | join kind=inner Roots on OperationId
     | where ParentId == RootSpanId
-    | project OperationId, ParentTime = TimeGenerated, ParentIn = InTok;
+    | project OperationId, ParentTime = TimeGenerated, ParentIn = InTok, ParentAgent = Agent;
 SubFirst
 | join kind=inner ParentCalls on OperationId
 | where ParentTime < TimeGenerated
-| summarize arg_max(ParentTime, ParentIn) by OperationId, SubSpanId, SubAgent, SubFirstIn = InTok
+| summarize arg_max(ParentTime, ParentIn, ParentAgent) by OperationId, SubSpanId, SubAgent, SubFirstIn = InTok
+| join kind=inner (S | project SubAgent = Agent, SSub = STok) on SubAgent
+| join kind=inner (S | project ParentAgent = Agent, SParent = STok) on ParentAgent
+| where ParentIn > SParent
+| extend PassRatio = todouble(SubFirstIn - SSub) / (ParentIn - SParent)
 | summarize Delegations = count(),
             P50SubFirstIn = percentile(SubFirstIn, 50),
-            P50ParentIn = percentile(ParentIn, 50) by SubAgent
+            P50ParentIn = percentile(ParentIn, 50),
+            P50PassRatio = percentile(PassRatio, 50) by SubAgent
 ```
 
 이 쿼리는 LLM 호출 span이 하위 `invoke_agent`의 직계 자식이라고 가정한다. 중간 span이 끼는 프레임워크라면 ParentId를 한 단계 더 올라가 매핑한다. 같은 매핑으로 하위 에이전트별 호출 수를 구해 B1, B4에도 쓴다.
 
-- **판정**: 전달 비율이 0.8 이상이면 상위 컨텍스트 대부분이 하위로 넘어가는 것이다(초기값). 비율 1이 "전체 전달"을 뜻하므로 기준의 의미가 분명하다. \[C\]로 하위 에이전트 역할에 필요한 부분인지 확인해 D4로 판정한다. 하위 응답 반입이 크면 상위 쪽에서 C2와 같은 재전송 문제가 생긴다.
+- **판정**: 전달 비율 p50이 0.8 이상이면 상위 가변 컨텍스트 대부분이 하위로 넘어가는 것이다(초기값). 비율 1이 "상위 가변 컨텍스트 전체 전달"을 뜻하므로 기준의 의미가 분명하다. 상위 에이전트의 S\_a를 모르면 판정을 보류한다. \[C\]로 하위 에이전트 역할에 필요한 부분인지 확인해 D4로 판정한다. 하위 응답 반입이 크면 상위 쪽에서 C2와 같은 재전송 문제가 생긴다.
 - **낭비 추정**: Σ(위임) (전달 토큰 − 필요 토큰) × 하위 에이전트 호출 수 × P\_eff.
 
 ## E. 모델·출력 설정
@@ -1022,7 +1030,7 @@ Calls
   by Agent, Model
 ```
 
-- **판정**: 잘림이 반복되고 잘린 뒤 후속 호출이 이어지면 E4로 판정한다. TruncReasonShare가 0.8 이상이면 reasoning 소진형이다.
+- **판정**: 잘림이 반복되고(2건 이상) 잘린 뒤 후속 호출이 이어지면 E4로 판정한다. TruncReasonShare가 0.8 이상이면 reasoning 소진형이다.
 - **낭비 추정**: Σ 잘린 호출 Cost + 잘림 때문에 생긴 후속 호출 Cost.
 
 ## F. 실패로 인한 낭비
@@ -1061,7 +1069,7 @@ Calls
 ```
 
 - **판정**
-  - 특정 tool의 실패율이 높고, 실패 턴의 비용·호출 수 중앙값이 정상 턴보다 크면 F1로 판정한다.
+  - 특정 tool의 실패가 반복되고(2건 이상), 실패 턴의 비용 중앙값이 정상 턴보다 크면 F1로 판정한다. 실패율의 수치 기준은 두지 않고 실패 턴과 정상 턴의 비용을 비교한다.
   - `error.type`으로 인자 오류와 외부 장애를 나눈다. 인자 오류가 많으면 tool 설명이 불명확한 경우가 많으니 B2 리뷰와 함께 본다.
 - **낭비 추정**: Σ(실패 턴) (턴 비용 − 정상 턴 비용 중앙값).
 
@@ -1091,7 +1099,7 @@ Calls
 실패 호출은 `ResultCode`와 `tostring(Properties["error.type"])`로 다시 나눠 본다.
 
 - **판정**
-  - 실패 호출 비율이 높거나 재요청이 반복되면 F2로 판정한다.
+  - 실패 호출이나 재요청이 반복되면(2건 이상) F2 후보로 올린다. 실패 비율의 수치 기준은 두지 않는다. 비용은 낭비 추정으로 보인다.
   - 토큰이 기록되지 않은 실패(예: 429)는 비용보다 지연 문제다.
   - 재요청이 출력 파싱 실패 뒤에 몰리면 \[S\]로 structured output 사용 여부를 확인한다.
 - **낭비 추정**: 토큰이 기록된 실패 호출 Cost + 재요청 호출 Cost.
@@ -1133,7 +1141,7 @@ Calls
 
 두 번째 쿼리로 대화별 사용자 메시지를 뽑은 뒤, 연속 메시지의 임베딩 유사도는 Python 등으로 계산한다. 메시지 구조(`parts[0].content`)는 계측에 따라 다를 수 있으니 실제 JSON을 먼저 확인한다.
 
-- **판정**: \[C\] 재질문 비율이 높고, 재질문 직전 턴의 응답이 샘플에서 불완전하거나 엉뚱하면 F3로 판정한다. \[T\] 근사만 있으면 "후보"로 기록한다. 빠른 재입력이 꼭 재질문은 아니기 때문이다.
+- **판정**: \[C\] 재질문 비율이 높고, 재질문 직전 턴의 응답이 샘플에서 불완전하거나 엉뚱하면 F3로 판정한다. 빠른 재입력 비율의 수치 기준은 두지 않는다. \[T\] 근사만 있으면 비율과 직전 턴 비용을 기록하고 판정을 보류한다. 빠른 재입력이 꼭 재질문은 아니기 때문이다.
 - **낭비 추정**: Σ(재질문 직전 턴) 턴 비용.
 
 ### F4. 실패로 끝난 턴

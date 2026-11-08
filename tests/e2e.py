@@ -17,9 +17,11 @@ RANK = {"해당": 3, "후보": 2}
 # 심어 둔 문제 → 최소 판정. "해당"이 기대되는 것은 "해당" 이상이어야 하고, "후보"는 후보 이상이면 된다.
 EXPECT_AT_LEAST = {
     "A1": "해당", "A4": "해당", "A5": "후보", "A6": "후보", "B1": "후보", "B2": "후보", "C1": "해당",
-    "C2": "후보", "C3": "후보", "D1": "후보", "D3": "해당", "D4": "후보", "E1": "후보", "E4": "해당",
-    "F1": "해당", "F3": "후보",
+    "C2": "후보", "C3": "후보", "D1": "해당", "D4": "후보", "E1": "후보", "E4": "해당",
+    "F1": "해당",
 }
+# 심어 둔 문제지만 가이드에 수치 기준이 없어 스크립트가 판정하지 않는 원인. 값과 함께 판정 보류로 남아야 한다
+EXPECT_HOLD = {"D3": "support-router", "F3": "support-router"}
 EXPECT_NOT_FLAGGED = ["A2", "D2", "F4"]       # 심지 않은 문제. 해당·후보가 나오면 오탐이다
 
 
@@ -96,6 +98,9 @@ def main():
                 for cid, want in EXPECT_AT_LEAST.items():
                     got = v[cid]
                     ok(RANK.get(got, 0) >= RANK[want], f"{cid} 기대 {want} 이상 · 실제 {got}")
+                for cid, agent in EXPECT_HOLD.items():
+                    c_ = next(c for c in rep["causes"] if c["id"] == cid)
+                    ok(c_["verdict"] == "판정 보류" and agent in (c_.get("basis") or ""), f"{cid} 판정 보류이고 근거에 {agent}의 값이 있다 · 실제 {c_['verdict']}")
                 for cid in EXPECT_NOT_FLAGGED:
                     ok(v[cid] not in RANK, f"{cid} 심지 않은 문제가 잡히지 않아야 한다 · 실제 {v[cid]}")
                 cards = sorted([c for c in rep["causes"] if c["verdict"] in RANK and c.get("waste")], key=lambda c: -c["waste"]["usd"])

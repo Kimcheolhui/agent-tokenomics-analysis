@@ -17,12 +17,10 @@ cr AS (SELECT Agent, 1.0 * sum(CacheTok) / nullif(sum(InTok), 0) AS r, avg(PIn) 
        FROM calls GROUP BY 1)
 SELECT p.SubAgent, count(*) AS Delegations, any_value(s.STok) AS SubSa,
        quantile_cont(p.SubFirstIn, 0.5) AS P50SubFirstIn, quantile_cont(p.ParentIn, 0.5) AS P50ParentIn,
-       -- PassRatio: 가이드 정의 (하위 첫 Input − S_sub) ÷ 상위 직전 Input. 상위의 고정 Input S_parent가 분모에 있어
-       --   상위 컨텍스트를 통째로 넘겨도 1에 도달하지 못한다.
-       -- PassRatioVar: (하위 첫 Input − S_sub) ÷ (상위 직전 Input − S_parent). 상위의 가변 컨텍스트 중 넘어간 몫이라
-       --   1이 "전체 전달"을 뜻한다. 판정 기준 0.8은 이 정의에 맞는다. S_parent가 없으면 NULL이다.
-       round(quantile_cont((p.SubFirstIn - coalesce(s.STok, 0)) * 1.0 / nullif(p.ParentIn, 0), 0.5), 3) AS P50PassRatio,
-       round(quantile_cont((p.SubFirstIn - coalesce(s.STok, 0)) * 1.0 / nullif(p.ParentIn - ps.STok, 0), 0.5), 3) AS P50PassRatioVar,
+       -- PassRatio: (하위 첫 Input − S_sub) ÷ (상위 직전 Input − S_parent). 상위 가변 컨텍스트 중 하위로 넘어간 비율이다.
+       --   1이면 상위 가변 컨텍스트 전체가 넘어간 것이다. S_parent가 없거나 분모가 0 이하면 NULL이다.
+       round(quantile_cont((p.SubFirstIn - coalesce(s.STok, 0)) * 1.0
+                           / CASE WHEN p.ParentIn - ps.STok > 0 THEN p.ParentIn - ps.STok END, 0.5), 3) AS P50PassRatio,
        any_value(ps.STok) AS ParentSa,
        -- 상한: 전달한 컨텍스트(S_sub 제외)가 모두 불필요하다고 본다. 필요 비율은 [C] 리뷰로 정한다(d4_needed_fraction).
        round(sum(greatest(p.SubFirstIn - coalesce(s.STok, 0), 0) * p.SubCalls

@@ -2,31 +2,20 @@ Key,Value,Kind,Dir,Note
 cache_achievement,0.7,judge,lower,A 공통. 캐시 달성률이 이 값 미만이면 A1–A6 점검
 a1_warm_miss,0.2,judge,higher,A1. 보존 시간 내 첫 호출 미스율
 a1_variant_ratio,0.1,judge,higher,A1. System prompt 변형 비율
-cache_mid_turn,0.7,judge,lower,증상 "턴 중간에 캐시율이 떨어진다". 가이드에 수치 기준이 없어 A 공통과 같은 값을 임시로 쓴다
-a3_hit_drop,0.2,judge,higher,A3. 축소 직후 히트율이 평상시보다 이 값 이상 낮으면 후보. 가이드에 수치가 없어 임시
-a5_hit_drop,0.3,judge,higher,A5. 보존 시간 안 구간 대비 밖 구간의 첫 호출 히트율 하락폭. 가이드에 수치가 없어 임시
-a6_hit_drop,0.1,judge,higher,A6. 기준 이하 구간 대비 몰린 구간의 히트율 하락폭. 가이드에 수치가 없어 임시
 b_fixed_share,0.3,judge,higher,B 공통. 고정 Input 비용 비중
 b1_use_rate,0.01,judge,lower,B1. tool 사용률이 이 값 미만이면 미사용 후보
 b2_ratio,3,judge,higher,B2. 같은 에이전트 tool 정의 크기 중앙값 대비 배수
 c1_multiple,2,judge,higher,C1. 턴 간 Input 증가 배수
 c2_multiple,2,judge,higher,C2. 턴 내 Input 증가 배수 p50
 c2_growth_rate,0.5,judge,higher,C2. 호출당 증가율 p95
-c3_low_or_dup,0.3,judge,higher,C3. 저점수·중복 문서 비율. 가이드에 수치가 없어 임시
+c3_low_or_dup,0.5,judge,higher,"C3. 저점수·중복 문서 비율. 가이드의 ""대부분 고점수이면 정상""을 뒤집어 과반(0.5)으로 읽는다"
 d1_tail_share,0.15,judge,higher,D1. 꼬리 턴 비용 비중
-d1_dup_rate,0.1,judge,higher,D1. 중복 tool 호출 비율. 꼬리 턴 조건과 함께 만족하면 해당. 가이드에 수치가 없어 임시
-d2_serial_share,0.2,judge,higher,D2. 순차 연쇄 턴 비율. 가이드에 수치가 없어 임시
-d3_short_cost,0.05,judge,higher,D3. 짧은 출력 호출의 비용 비중. 가이드에 "의미 있는"이라고만 있어 임시
-d3_diversity,0.1,judge,lower,D3. 짧은 출력의 다양성. 가이드에 수치가 없어 임시
-d4_pass_ratio,0.8,judge,higher,D4. 위임 시 Input 전달 비율. PassRatioVar(상위 가변 컨텍스트 대비)에 적용한다
+d4_pass_ratio,0.8,judge,higher,D4. 위임 시 Input 전달 비율 (하위 첫 Input − S_sub) ÷ (상위 직전 Input − S_parent)
 e1_saving_share,0.1,judge,higher,E1. 상위 모델 잠재 절감 비중
-e4_trunc_rate,0.005,judge,higher,E4. 잘림 비율. 가이드에 수치가 없어 임시
 e4_reason_share,0.8,judge,higher,E4. 잘린 호출의 reasoning 비중이 이 값 이상이면 reasoning 소진형
-f1_fail_rate,0.1,judge,higher,F1. tool 실패율. 가이드에 수치가 없어 임시
-f2_fail_rate,0.02,judge,higher,F2. LLM 호출 실패·재요청 비율. 가이드에 수치가 없어 임시
-f3_quick_rate,0.05,judge,higher,F3. 빠른 재입력 비율. 가이드에 수치가 없어 임시
 f4_late_fail,1.5,judge,higher,F4. 늦은 실패 계수
 min_sample,30,param,,비율로 판정할 때 필요한 최소 표본 수(호출·턴·이벤트). 이보다 작으면 우연으로 보고 판정에서 뺀다
+alpha,0.01,param,,A3·A5·A6·D1 비교의 단측 검정 유의수준. 가이드에 크기 기준이 없는 비교는 차이가 우연인지만 보고 크기는 낭비 추정으로 보인다
 short_output_tok,50,param,,D3·E1 호출 유형. 가시 출력이 이 값 미만이면 짧은 출력
 resend_tok_diff,50,param,,F2. 직전 호출과 Input 차이가 이 값 이하면 재요청 추정
 quick_retry_sec,60,param,,F3. 직전 턴 종료 후 이 시간 안에 시작된 턴

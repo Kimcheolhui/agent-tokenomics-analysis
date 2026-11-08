@@ -147,7 +147,7 @@ python3 <skill>/scripts/validate_report.py out/report.json
 
 - 에이전트 토큰 사용은 꼬리가 길고 같은 작업도 실행마다 크게 달라서(Bai et al., 2026, arXiv 2604.22750) **절대 토큰 수는 기준으로 쓰지 않는다**. 의미가 분명한 비율이나 자기 분포 대비 값을 쓴다.
 - 낭비 추정은 **원인끼리 합산하지 않는다**. 같은 토큰을 겹쳐 셀 수 있다. 상한·기준선·간이식으로 구한 값은 보고서에 "상한" 표시가 붙는다.
-- 가이드에 수치 기준이 없는 판정은 `config/thresholds.csv`에서 Note에 "임시"로 표시했다. 보고서에서 그 기준을 쓴 판정은 임시 기준을 썼다고 밝힌다.
+- 가이드에 수치 기준이 없는 판정에는 임의의 수치를 두지 않는다. 가이드 문구에서 유도한 값(C3·E4·F1·F2), 기준 집단과의 단측 검정(A3·A5·A6·D1, `alpha`), 판정 보류(D2·D3·F3) 중 하나로 처리한다. 판정 보류인 원인은 근거의 값을 보고 `[C]`·`[S]` 확인 뒤 `review.json`으로 판정한다. 목록은 `references/metrics-notes.md`에 있다.
 - `지표를 산출하지 못한 것`은 낮은 값으로 처리하지 않는다. `계측 부재`, `미점검`, `판정 보류`로 따로 기록한다.
 - 품질 영향은 진단 범위 밖이다. E 범주에서 찾은 것은 `후보`로 기록한다.
 
@@ -172,7 +172,7 @@ python3 <skill>/scripts/validate_report.py out/report.json
 | `references/build-mapping.md` | 지표 → REPORT 대응, 게이트, `review.json` 형식 |
 | `references/report-schema.md` | REPORT 객체 스키마 |
 | `references/writing-style.md` | REPORT와 `review.json` 문장을 쓸 때. 쓰지 않는 표현과 대체 표현, 남겨 둔 용어 |
-| `references/metrics-notes.md` | 가이드와 SQL 정의가 다른 곳, 임시 기준, 낭비 추정의 성격 |
+| `references/metrics-notes.md` | 가이드와 SQL 정의가 다른 곳, 수치 기준이 없는 판정의 처리, 낭비 추정의 성격 |
 | `references/sources.md` | 출처 |
 
 ## 알려진 한계

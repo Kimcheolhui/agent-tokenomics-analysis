@@ -114,6 +114,6 @@ Calls
   by Agent, Model
 ```
 
-- **판정**: 잘림이 반복되고 잘린 뒤 후속 호출이 이어지면 E4로 판정한다. TruncReasonShare가 0.8 이상이면 reasoning 소진형이다.
+- **판정**: 잘림이 반복되고(2건 이상) 잘린 뒤 후속 호출이 이어지면 E4로 판정한다. TruncReasonShare가 0.8 이상이면 reasoning 소진형이다.
 - **낭비 추정**: Σ 잘린 호출 Cost + 잘림 때문에 생긴 후속 호출 Cost.
 

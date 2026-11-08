@@ -45,7 +45,7 @@ content가 없으면 \[T\] 근사로, 한 턴에서 같은 tool을 3회 이상 �
 - **판정**
   - 꼬리 턴 비용 비중이 0.15 이상이면, 호출 수 상위 5% 턴이 균등 분배 비중(5%)의 3배 넘는 비용을 차지하는 것이므로 꼬리 턴을 샘플로 연다(초기값). 에이전트 토큰 사용은 원래 꼬리가 길고 같은 작업도 실행마다 크게 달라서, 꼬리가 차지하는 비용을 기준으로 삼는다([Bai et al., 2026](https://arxiv.org/pdf/2604.22750)).
   - MaxN이 프레임워크의 최대 반복 횟수와 같은 턴이 있으면 반복 상한에 걸린 것이므로 바로 D1로 확정한다.
-  - 꼬리 턴에서 중복 tool 호출 비율이 높으면 D1로 판정한다.
+  - 꼬리 턴의 중복 tool 호출 비율이 나머지 턴보다 높으면(단측 검정) D1로 판정한다.
   - 꼬리 비율(p95 ÷ p50)은 분포 모양을 해석할 때 쓴다.
   - 꼬리 턴에 tool 실패가 많으면 F1, LLM 오류가 많으면 F2를 본다.
 - **낭비 추정**: Σ(중복 tool 호출) 그 결과를 처리한 다음 LLM 호출의 비용. 간이식은 꼬리 턴 비용 − 꼬리 턴 수 × 턴 비용 중앙값이다.
@@ -72,7 +72,7 @@ Calls
   by Agent
 ```
 
-- **판정**: 라운드당 tool 수가 1에 가깝고 순차 연쇄 턴이 많은데, \[C\]로 보니 연속 tool이 서로의 결과를 인자로 쓰지 않으면 D2로 판정한다. 의존 관계가 있으면 정상이다.
+- **판정**: 라운드당 tool 수가 1에 가깝고 순차 연쇄 턴이 있는데, \[C\]로 보니 연속 tool이 서로의 결과를 인자로 쓰지 않으면 D2로 판정한다. 의존 관계가 있으면 정상이다. 순차 연쇄 턴 비율의 수치 기준은 두지 않는다. 비율과 낭비 상한을 기록하고 \[C\] 확인 전까지 판정을 보류한다.
 - **낭비 추정**: 연쇄 길이 k인 턴마다 (k − 1) × 해당 라운드들의 평균 InTok × P\_eff.
 
 ### D3. 결정적 단계의 LLM 처리
@@ -102,7 +102,7 @@ Calls
 | extend OutputDiversity = round(1.0 * DistinctOutputs / ShortCalls, 3)
 ```
 
-- **판정**: 짧은 출력 호출의 비용 비중이 의미 있고 출력 다양성이 낮으면(소수의 레이블로 수렴하면) D3로 판정한다. 그 호출이 상위 모델이면 E1과 겹친다.
+- **판정**: 짧은 출력 호출의 비용 비중이 의미 있고 출력 다양성이 낮으면(출력 종류가 몇 개의 레이블뿐이면) D3로 판정한다. 비용 비중과 다양성의 수치 기준은 두지 않는다. 두 값을 기록하고 \[S\]로 규칙 처리가 가능한 단계인지 확인하기 전까지 판정을 보류한다. 그 호출이 상위 모델이면 E1과 겹친다.
 - **낭비 추정**: 해당 호출의 비용 전체. 규칙으로 대체할 수 있다고 볼 때의 상한이다.
 
 ### D4. 에이전트 간 컨텍스트 중복
@@ -110,12 +110,13 @@ Calls
 - **정의**: 상위 에이전트가 하위 에이전트에 전체 이력과 이전 tool 결과를 그대로 넘긴다. 또는 하위 에이전트의 긴 응답 전체를 다시 Input으로 받는다.
 - **확인 방법**: \[T\] 루트가 아닌 `invoke_agent` span으로 하위 에이전트 실행을 찾는다. 하위 첫 호출 InTok과 위임 직전 상위 호출 InTok을 비교한다. \[C\] 실제로 전달된 메시지를 확인한다.
 - **지표**
-  - 위임 시 전달 비율 = (하위 첫 호출 InTok − S\_sub) ÷ 위임 직전 상위 호출 InTok
+  - 위임 시 전달 비율 = (하위 첫 호출 InTok − S\_sub) ÷ (위임 직전 상위 호출 InTok − S\_parent). 분모는 상위 호출의 가변 컨텍스트(이력, tool 결과, 사용자 입력)다. 하위의 고정 Input과 상위의 고정 Input을 양쪽에서 빼므로 상위 가변 컨텍스트를 모두 넘기면 1이 된다.
   - 하위 응답 반입 크기 = 하위 실행 직후 상위 다음 호출의 ΔIn(C2 정의)
 
-**쿼리: 위임 시 Input 전달량.** 하위 에이전트의 첫 호출 InTok과 위임 직전 상위 에이전트 호출의 InTok을 짝지어 비교한다. 상위 이력이 하위로 통째로 넘어가는지(D4) 확인한다.
+**쿼리: 위임 시 Input 전달량.** 하위 에이전트의 첫 호출 InTok과 위임 직전 상위 에이전트 호출의 InTok을 짝지어 비교한다. 양쪽에서 S\_a를 빼고 전달 비율을 구해 상위 이력이 하위로 통째로 넘어가는지(D4) 확인한다.
 
 ```kusto
+let S = datatable(Agent:string, STok:long) [ "<에이전트명>", 0 ];   // 측정법 1–3으로 구한 S_a
 let Roots = Spans | where Op == "invoke_agent"
     | summarize arg_min(TimeGenerated, Id) by OperationId | project OperationId, RootSpanId = Id;
 let SubAgentSpans = Spans | where Op == "invoke_agent"
@@ -128,18 +129,23 @@ let SubFirst = Calls
 let ParentCalls = Calls
     | join kind=inner Roots on OperationId
     | where ParentId == RootSpanId
-    | project OperationId, ParentTime = TimeGenerated, ParentIn = InTok;
+    | project OperationId, ParentTime = TimeGenerated, ParentIn = InTok, ParentAgent = Agent;
 SubFirst
 | join kind=inner ParentCalls on OperationId
 | where ParentTime < TimeGenerated
-| summarize arg_max(ParentTime, ParentIn) by OperationId, SubSpanId, SubAgent, SubFirstIn = InTok
+| summarize arg_max(ParentTime, ParentIn, ParentAgent) by OperationId, SubSpanId, SubAgent, SubFirstIn = InTok
+| join kind=inner (S | project SubAgent = Agent, SSub = STok) on SubAgent
+| join kind=inner (S | project ParentAgent = Agent, SParent = STok) on ParentAgent
+| where ParentIn > SParent
+| extend PassRatio = todouble(SubFirstIn - SSub) / (ParentIn - SParent)
 | summarize Delegations = count(),
             P50SubFirstIn = percentile(SubFirstIn, 50),
-            P50ParentIn = percentile(ParentIn, 50) by SubAgent
+            P50ParentIn = percentile(ParentIn, 50),
+            P50PassRatio = percentile(PassRatio, 50) by SubAgent
 ```
 
 이 쿼리는 LLM 호출 span이 하위 `invoke_agent`의 직계 자식이라고 가정한다. 중간 span이 끼는 프레임워크라면 ParentId를 한 단계 더 올라가 매핑한다. 같은 매핑으로 하위 에이전트별 호출 수를 구해 B1, B4에도 쓴다.
 
-- **판정**: 전달 비율이 0.8 이상이면 상위 컨텍스트 대부분이 하위로 넘어가는 것이다(초기값). 비율 1이 "전체 전달"을 뜻하므로 기준의 의미가 분명하다. \[C\]로 하위 에이전트 역할에 필요한 부분인지 확인해 D4로 판정한다. 하위 응답 반입이 크면 상위 쪽에서 C2와 같은 재전송 문제가 생긴다.
+- **판정**: 전달 비율 p50이 0.8 이상이면 상위 가변 컨텍스트 대부분이 하위로 넘어가는 것이다(초기값). 비율 1이 "상위 가변 컨텍스트 전체 전달"을 뜻하므로 기준의 의미가 분명하다. 상위 에이전트의 S\_a를 모르면 판정을 보류한다. \[C\]로 하위 에이전트 역할에 필요한 부분인지 확인해 D4로 판정한다. 하위 응답 반입이 크면 상위 쪽에서 C2와 같은 재전송 문제가 생긴다.
 - **낭비 추정**: Σ(위임) (전달 토큰 − 필요 토큰) × 하위 에이전트 호출 수 × P\_eff.
 

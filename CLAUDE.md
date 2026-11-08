@@ -16,8 +16,8 @@
 | `queries/views.sql` | 로컬 분석 기본 뷰. 가이드 "공통 쿼리 정의"에 대응한다 | — |
 | `scripts/export.py` | az CLI 추출. 하루 단위 파일로 내린다 | — |
 | `config/` | 모델 단가·캐시 파라미터와 에이전트별 S_a. 고객마다 채운다 | — |
-| `config/thresholds.csv` | 판정 기준(judge)과 정의용 매개변수(param). "임시"로 적힌 값은 가이드에 수치가 없어 정한 값이다 | — |
-| `queries/metrics/*.sql` | 원인별 지표 SQL 27개 파일, 61개 쿼리. 파일 ID는 가이드의 원인 ID를 따른다 | — |
+| `config/thresholds.csv` | 판정 기준(judge)과 정의용 매개변수(param). 가이드에 수치가 없는 판정은 임의 수치를 두지 않는다(`docs/metrics-notes.md`) | — |
+| `queries/metrics/*.sql` | 원인별 지표 SQL 27개 파일, 62개 쿼리. 파일 ID는 가이드의 원인 ID를 따른다 | — |
 | `scripts/` | `export.py`(추출), `run_metrics.py`(지표), `build_report.py`(보고서), `validate_report.py`, `build_skill.py`, `gen_synthetic.py`(합성 데이터) | — |
 | `docs/data-contract.md`, `report-schema.md`, `build-mapping.md`, `metrics-notes.md` | CSV 스키마, REPORT 스키마, 지표 → REPORT 대응과 `review.json`, 가이드와 SQL이 다른 곳 | — |
 | `docs/writing-style.md`, `scripts/lint_text.py` | REPORT 문체 규칙(비유·AI체 제외)과 검사기 | — |
@@ -49,6 +49,7 @@
 
 - 에이전트 토큰 사용은 꼬리가 길고 같은 작업도 실행마다 크게 달라서(Bai et al., 2026, arXiv 2604.22750), **절대 토큰 수는 기준으로 쓰지 않는다**. 의미가 분명한 비율이나 자기 분포 대비 값을 쓴다.
 - 모든 수치 기준은 "초기값"이며 고객 데이터를 보고 보정한다.
+- 가이드에 수치가 없는 판정은 근거 없는 수치를 두지 않는다. 가이드 문구에서 값을 유도하거나, 데이터 안의 기준 집단과 단측 검정으로 비교하거나, 판정을 보류하고 리뷰로 넘긴다.
 
 | 증상 / 원인 | 지표 | 기준 |
 | --- | --- | --- |
@@ -58,7 +59,7 @@
 | C1 | 턴 간 Input 증가 배수 (대화 길이 p90 턴 ÷ 1턴, 첫 호출 InTok p50) | ≥ 2 |
 | C2 | 턴 내 Input 증가 배수 p50 (마지막 ÷ 첫 호출 InTok), 호출당 증가율 p95 | ≥ 2, ≥ 0.5 |
 | D1 | 꼬리 턴 비용 비중 (호출 수 상위 5% 턴) | ≥ 0.15, 최대 반복 도달 시 확정 |
-| D4 | 위임 시 Input 전달 비율 | ≥ 0.8 |
+| D4 | 위임 시 Input 전달 비율 = (하위 첫 InTok − S_sub) ÷ (상위 직전 InTok − S_parent) | ≥ 0.8 |
 | E1 | 상위 모델 잠재 절감 비중 | ≥ 0.1 |
 | E2 | 단순 단계와 최종 응답 단계의 reasoning 수준·분포 비교 | 수치 기준 없음 (작업 복잡도에 종속) |
 | E3 | 목표 길이 대비 최종 응답 길이 | 고객 목표 길이가 없으면 판정 보류 |
@@ -89,13 +90,13 @@ python3 scripts/build_skill.py                                                  
 ## 남은 일과 열린 질문
 
 - KQL은 실제 고객 데이터로 실행해 보지 않았다. 먼저 공통 전제의 "속성 키 확인" 쿼리로 `cache_read`, `reasoning`, `conversation.id` 키가 쌓이는지 확인한다.
-- 증상 "턴 중간에 캐시율이 떨어진다"는 가이드에 수치 기준이 없다. 보고서 템플릿은 A 공통과 같은 0.7을 임시로 쓴다.
+- 증상 "턴 중간에 캐시율이 떨어진다"는 A 공통 캐시 달성률을 두 번째 이후 호출로 좁힌 같은 지표라서 같은 기준 0.7을 쓴다.
 - `gen_ai.response.finish_reasons`의 tool 호출 값을 `tool_calls`로 가정했다. 실제 값을 확인해야 한다.
 - 턴 1개 = trace 1개 가정을 고객 앱에서 확인해야 한다.
 - gen_ai 속성은 OTel에서 아직 Development 단계라 이름이 바뀔 수 있다(예: `cache_creation` → `cache_write`).
 - **추출 KQL 9개는 실제 Log Analytics에서 실행해 보지 않았다.** DuckDB 쪽(뷰·지표 SQL·빌더)은 합성 데이터로만 검증했다. 합성 데이터는 내가 심은 문제만 검증하며, 실제 텔레메트리의 모양과 다를 수 있다.
-- `config/thresholds.csv`에서 "임시"로 표시한 기준 11개는 가이드에 수치가 없어 정했다. `e4_trunc_rate`는 합성 데이터의 잘림 비율(약 1%)이 기준 바로 아래라서 0.01에서 0.005로 낮췄다. 근거가 약하므로 고객 데이터로 보정한다.
-- 가이드와 SQL이 다른 정의를 쓰는 곳 7개는 `docs/metrics-notes.md`에 있다. 특히 D4 전달 비율은 가이드 정의로는 1에 도달할 수 없어서 `PassRatioVar`를 추가했고, 가이드의 해당 정의를 고칠지 정해야 한다.
+- 가이드에 수치 기준이 없는 판정 12개는 임의 수치를 두지 않았다(2026-11-09). 가이드 문구에서 유도(C3 0.5, E4·F1·F2 "반복" = 2건 이상, 턴 중간 캐시율 = A 공통 0.7), 기준 집단과의 단측 검정(A3·A5·A6·D1, 유의수준 0.01), 판정 보류(D2·D3·F3) 중 하나로 처리한다. 검정은 크기를 보지 않아 표본이 크면 작은 차이도 `후보`가 된다. 합성 데이터에서 심지 않은 A3·F2가 `후보`로 나온다. 목록은 `docs/metrics-notes.md`에 있다.
+- 가이드와 SQL이 다른 정의를 쓰는 곳 6개는 `docs/metrics-notes.md`에 있다. D4 전달 비율은 분모에서 S_parent를 빼도록 가이드 정의를 고쳤다(2026-11-09).
 - 원본 가이드(`docs/diagnosis-guide.md`)의 KQL은 인라인으로 남아 있고 SQL과 따로 있다. 둘이 어긋나지 않게 하려면 한쪽을 기준으로 정해야 한다.
 
 ## 작성 규칙

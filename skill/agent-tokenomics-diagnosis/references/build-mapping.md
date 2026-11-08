@@ -23,12 +23,12 @@ python3 scripts/validate_report.py out/report.json
 | --- | --- | --- | --- |
 | S1 캐시 달성률 | `A-common.agent_cache`에서 S_a가 있는 에이전트의 ΣActual ÷ ΣTheoretical | `cache_achievement` | `cache_read` 미수집 또는 S_a 없음 → nodata |
 | S2 첫 호출 미스 | `A1.warm_first_miss`의 ΣMiss ÷ ΣWarmFirstCalls | `a1_warm_miss` | `cache_read` 미수집 → nodata |
-| S3 턴 중간 | `A-common.overall.AchievementSecondPlus` | `cache_mid_turn`(임시) | 위와 같다 |
+| S3 턴 중간 | `A-common.overall.AchievementSecondPlus` | `cache_achievement` (같은 지표) | 위와 같다 |
 | S4 고정 Input 비중 | `B-common.overall.FixedCostShare` | `b_fixed_share` | S_a 없음 → nodata |
 | S5 턴 내 증가 | `C2.turn_growth.P50Multiple` 최악 에이전트 | `c2_multiple` | |
 | S6 턴 간 증가 | `C1.cross_turn.CrossTurnMultiple` 최악 | `c1_multiple` | `conversation.id` 없음 → nodata |
 | S7 꼬리 비용 | `D1.tail_turns.TailCostShare` 최악 | `d1_tail_share` | |
-| S8 위임 시 전달 | `D4.delegation.P50PassRatioVar` 최악 | `d4_pass_ratio` | 위임 없음 → nodata |
+| S8 위임 시 전달 | `D4.delegation.P50PassRatio` 최악 | `d4_pass_ratio` | 위임 없음 또는 상위 S_a 없음 → nodata |
 | S9 Reasoning | 단순 단계(유형 1–3) 대 최종 응답(유형 4) 비교 | 수치 기준 없음 | `reasoning` 미수집 → nodata |
 | S10 응답 길이 | `E3.final_response.P95Visible` | `e3_target_tok`가 없으면 hold | |
 | S11 상위 모델 | `E1.savings.SavingShare` | `e1_saving_share` | 소형 모델 단가 없음 → hold |
@@ -42,10 +42,10 @@ python3 scripts/validate_report.py out/report.json
 | --- | --- | --- | --- |
 | A1 | `A1.warm_first_miss`, `inturn_misses`, `sys_variants` | 첫 호출 미스율 ≥ `a1_warm_miss`. 변형 비율 ≥ `a1_variant_ratio`까지 만족하면 `해당`, 아니면 `후보` | 보존 시간 안 첫 호출 미스 + (턴 안 미스율도 높으면) 턴 안 미스 |
 | A2 | `A2.tooldef_variants`, `variant_share`, `waste` | 원문 변형 > 이름 집합 변형, 또는 이름 집합 변형 ≥ 2 | 다른 정의를 쓴 첫 호출 |
-| A3 | `A3.shrink`, `conv_call_profile` | 축소 이벤트 ≥ `min_sample`이고 히트율 하락 ≥ `a3_hit_drop` → `후보` | 상한(공유 길이를 모름) |
+| A3 | `A3.shrink`, `conv_call_profile` | 축소 이벤트·평상시 호출 ≥ `min_sample`이고 축소 직후 캐시율 < 평상시(단측 검정, `alpha`) → `후보` | 상한(공유 길이를 모름) |
 | A4 | `A4.small_calls` | S_a < MinTok이고 실행 첫 호출의 95% 이상이 히트 0 | 캐시 불가 호출 비용(0이면 카드 없음) |
-| A5 | `A5.gap_hit` | 보존 시간 안 히트율 − 밖 히트율 ≥ `a5_hit_drop` | 구간별 계산 |
-| A6 | `A6.rpm_hit`, `endpoint_hit` | 요청이 집중된 구간의 히트율 하락 ≥ `a6_hit_drop` → `해당`, 엔드포인트 분산만 있으면 `후보` | 요청이 집중된 구간 계산 |
+| A5 | `A5.gap_hit` | 보존 시간 밖 히트율 < 안 히트율(단측 검정, `alpha`) → `해당` | 구간별 계산 |
+| A6 | `A6.rpm_hit`, `endpoint_hit` | 요청이 집중된 구간 히트율 < 기준 이하 구간(단측 검정, `alpha`) → `해당`, 엔드포인트 간 차이만 유의하면 `후보` | 요청이 집중된 구간 계산 |
 | B1 | `B1.tool_use` | 사용률 < `b1_use_rate` → `후보` | 미사용 tool 토큰 × 호출 수 × P_eff |
 | B2 | `B2.tool_schema_size` | 중앙값의 `b2_ratio`배 이상 → `후보` | 없음(`[S]` 리뷰) |
 | B3 | `B3.system_prompt_size`, `B-common` | 고정 Input 비중 ≥ `b_fixed_share` → `후보` | 없음(`[S]` 리뷰) |
@@ -53,17 +53,17 @@ python3 scripts/validate_report.py out/report.json
 | C1 | `C1.cross_turn`, `waste_baseline` | 배수 ≥ `c1_multiple` | 기준선(k = `c1_keep_turns`) |
 | C2 | `C2.growth_steps`, `turn_growth`, `result_carry` | 호출당 증가율 p95 ≥ `c2_growth_rate` 또는 턴 내 배수 ≥ `c2_multiple` → `후보` | 재전송 비용 × (1 − `c2_needed_fraction`) |
 | C3 | `C3.retrieval_quality`, `score_hist` | 저점수·중복 비율 ≥ `c3_low_or_dup` → `후보` | 검색 tool 재전송 비용 × 저점수·중복 비율 |
-| D1 | `D1.tail_turns`, `dup_tool_calls`, `n_hist` | 꼬리 비중 ≥ `d1_tail_share`. 중복률 ≥ `d1_dup_rate`까지 만족하면 `해당` | 간이식(꼬리 초과 비용) |
-| D2 | `D2.round_tools` | 순차 연쇄 비율 ≥ `d2_serial_share` → `후보` | 상한 |
-| D3 | `D3.short_output`, `output_diversity` | 다양성 ≤ `d3_diversity`이고 비용 비중 ≥ `d3_short_cost` | 짧은 출력 호출 비용 |
-| D4 | `D4.delegation` | `PassRatioVar` ≥ `d4_pass_ratio` → `후보` | 전달분 × (1 − `d4_needed_fraction`) |
+| D1 | `D1.tail_turns`, `dup_tool_calls`, `n_hist` | 꼬리 비중 ≥ `d1_tail_share` → `후보`. 꼬리 턴 중복률 > 나머지 턴(`dup_tail_vs_rest`, 단측 검정)이면 `해당` | 간이식(꼬리 초과 비용) |
+| D2 | `D2.round_tools` | 순차 연쇄 턴이 있으면 `판정 보류`(수치 기준 없음). 근거에 비율과 상한을 적는다 | 상한(근거 문장에만) |
+| D3 | `D3.short_output`, `output_diversity` | 짧은 출력 호출이 있으면 `판정 보류`(수치 기준 없음). 근거에 비용 비중·다양성을 적는다 | 짧은 출력 호출 비용(근거 문장에만) |
+| D4 | `D4.delegation` | `P50PassRatio` ≥ `d4_pass_ratio` → `후보`. 상위 S_a가 없으면 `판정 보류` | 전달분 × (1 − `d4_needed_fraction`) |
 | E1 | `E1.savings`, `savings_by_type` | 절감 비중 ≥ `e1_saving_share` → `후보` | 소형 모델 재계산 차이 |
 | E2 | `E2.reasoning_by_type`, `waste` | 단순 단계가 최종 응답 단계와 같은 수준이거나 p50이 절반 이상 → `후보` | 저수준 기준선이 있을 때만 |
 | E3 | `E3.final_response`, `waste_vs_target` | 목표 길이(`e3_target_tok`)가 없으면 `판정 보류` | 목표 길이가 있을 때만 |
-| E4 | `E4.truncation` | 잘림 비율 ≥ `e4_trunc_rate`이고 후속 호출 있음 | 잘린 호출 + 후속 호출 비용 |
-| F1 | `F1.tool_failures`, `fail_vs_ok_turns`, `waste` | 실패율 ≥ `f1_fail_rate`이고 실패 턴이 더 비쌈 | 실패 턴 초과 비용 |
-| F2 | `F2.llm_failures` | 실패·재요청 비율 ≥ `f2_fail_rate` → `후보` | 실패 + 재요청 추정 비용 |
-| F3 | `F3.quick_reinput`, `quick_pairs`, `waste` | 빠른 재입력 비율 ≥ `f3_quick_rate` → `후보` | 직전 턴 비용([T] 근사) |
+| E4 | `E4.truncation` | 잘림 ≥ 2건이고 후속 호출 있음 | 잘린 호출 + 후속 호출 비용 |
+| F1 | `F1.tool_failures`, `fail_vs_ok_turns`, `waste` | 실패 ≥ 2건인 tool이 있고 실패 턴 비용 중앙값이 더 크면 `해당` | 실패 턴 초과 비용 |
+| F2 | `F2.llm_failures` | 실패 ≥ 2건 또는 재요청 추정 ≥ 2건 → `후보` | 실패 + 재요청 추정 비용 |
+| F3 | `F3.quick_reinput`, `quick_pairs`, `waste` | 빠른 재입력 턴이 있으면 `판정 보류`(수치 기준 없음) | 직전 턴 비용([T] 근사, 근거 문장에만) |
 | F4 | `F4.failed_turns` | 늦은 실패 계수 ≥ `f4_late_fail` | 실패 턴 비용 |
 
 **게이트.** A 범주는 캐시 달성률이 `cache_achievement` 이상이면 `비해당`이다(가이드: 미만일 때 점검). B 범주는 고정 Input 비용 비중이 `b_fixed_share` 미만이면 `비해당`이다. A4는 게이트 없이 본다.

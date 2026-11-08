@@ -79,6 +79,7 @@ class Ctx:
         self.rpm_limit = min([int(float(p["RpmLimit"])) for p in self.params.values()] or [15])
         self.cpt = self.t("chars_per_token") or 4
         self.min_n = self.t("min_sample") or 30
+        self.alpha = self.t("alpha") or 0.01
 
     # 지표 접근
     def q(self, fid, name):
@@ -127,6 +128,34 @@ def W(usd_, formula, inputs, bound=False):
     if bound:
         w["bound"] = True
     return w
+
+
+# ───────────────────────── 검정 ─────────────────────────
+# 가이드에 크기 기준이 없는 비교(A3·A5·A6·D1)는 "기준 집단보다 낮은가(높은가)"를 단측 검정으로 본다.
+# 크기는 낭비 추정이 보여준다. 표본이 크면 정규 근사를 쓴다(표본 수는 min_sample 이상으로 거른다).
+def _p_upper(z):
+    return 0.5 * math.erfc(z / math.sqrt(2))
+
+
+def p_rate_lower(p_ref, n_ref, p_x, n_x):
+    """비율 p_x가 p_ref보다 낮다는 단측 검정의 p값 (두 비율 z 검정)."""
+    if not n_ref or not n_x or p_ref is None or p_x is None:
+        return 1.0
+    pool = (p_ref * n_ref + p_x * n_x) / (n_ref + n_x)
+    se = math.sqrt(pool * (1 - pool) * (1 / n_ref + 1 / n_x))
+    if se == 0:
+        return 0.0 if p_x < p_ref else 1.0
+    return _p_upper((p_ref - p_x) / se)
+
+
+def p_mean_lower(m_ref, sd_ref, n_ref, m_x, sd_x, n_x):
+    """평균 m_x가 m_ref보다 낮다는 단측 검정의 p값 (Welch, 정규 근사)."""
+    if not n_ref or not n_x or None in (m_ref, m_x):
+        return 1.0
+    se = math.sqrt((sd_ref or 0) ** 2 / n_ref + (sd_x or 0) ** 2 / n_x)
+    if se == 0:
+        return 0.0 if m_x < m_ref else 1.0
+    return _p_upper((m_ref - m_x) / se)
 
 
 def NODATA(why): return R("계측 부재", basis=why)
@@ -214,14 +243,15 @@ def build_symptoms(c):
     s2 = round(wm / wf, 3) if wf else None
     out.append(sym("S2", s2 if c.have_cache else None, "a1_warm_miss", note=None if c.have_cache else "cache_read 미수집"))
     s3 = ov.get("AchievementSecondPlus")
-    out.append(sym("S3", s3 if (c.have_cache and c.sa_agents) else None, "cache_mid_turn", note=None if c.have_cache else "cache_read 미수집"))
+    out.append(sym("S3", s3 if (c.have_cache and c.sa_agents) else None, "cache_achievement", note=None if c.have_cache else "cache_read 미수집"))
     out.append(sym("S4", fixed.get("FixedCostShare") if c.sa_agents else None, "b_fixed_share", note=None if c.sa_agents else "S_a 미측정"))
     out.append(sym("S5", worst(tg, "P50Multiple"), "c2_multiple", fmt="x"))
     s6 = max([r["CrossTurnMultiple"] for r in ct if r.get("CrossTurnMultiple") is not None] or [None]) if c.have_conv else None
     out.append(sym("S6", s6, "c1_multiple", fmt="x", note=None if c.have_conv else "gen_ai.conversation.id 미기록"))
     out.append(sym("S7", worst(tail, "TailCostShare"), "d1_tail_share"))
-    s8 = worst([dict(r, v=r.get("P50PassRatioVar") if r.get("P50PassRatioVar") is not None else r.get("P50PassRatio"), Turns=r["Delegations"]) for r in dl], "v")
-    out.append(sym("S8", s8, "d4_pass_ratio", note=None if dl else "하위 에이전트 위임이 없다"))
+    dlr = [dict(r, Turns=r["Delegations"]) for r in dl if r.get("P50PassRatio") is not None]
+    s8 = worst(dlr, "P50PassRatio")
+    out.append(sym("S8", s8, "d4_pass_ratio", note=None if dlr else ("상위 에이전트 S_a 미측정" if dl else "하위 에이전트 위임이 없다")))
     # S9: 단순 단계의 reasoning 수준과 분포를 최종 응답 단계와 비교한다
     if not c.have_reason:
         out.append(sym("S9", display="reasoning 토큰 미기록", thr_text="수치 기준 없음 · 단계 비교", status="hold"))
@@ -368,16 +398,15 @@ def build_causes(c):
         if not c.have_conv: return NODATA("gen_ai.conversation.id 미기록")
         if a_gate: return NO(a_gate_msg)
         sh = c.q("A3", "shrink")
-        drop = c.t("a3_hit_drop")
-        flagged = [r for r in sh if r["ShrinkEvents"] >= c.min_n and r["HitNormal"] is not None and r["HitAfterShrink"] is not None
-                   and r["HitNormal"] - r["HitAfterShrink"] >= drop]
+        flagged = [r for r in sh if r["ShrinkEvents"] >= c.min_n and (r.get("NormalCalls") or 0) >= c.min_n
+                   and p_mean_lower(r["HitNormal"], r.get("SdNormal"), r["NormalCalls"], r["HitAfterShrink"], r.get("SdAfterShrink"), r["ShrinkEvents"]) < c.alpha]
         prof = c.q("A3", "conv_call_profile")
         charts = [{"type": "columns", "wide": True, "title": "대화 안 호출별 Input 구성", "sub": "대화 안 호출 순번별 평균 CacheTok과 비캐시 Input",
                    "fmt": "tok", "xLabel": "대화 안 LLM 호출 순번", "xName": "호출", "series": [{"name": "캐시 히트"}, {"name": "비캐시 Input"}],
                    "bins": [{"label": str(r["ConvCallIdx"]), "segs": [r["AvgCached"], r["AvgNonCached"]]} for r in prof]}] if prof else None
         if not flagged:
             ev = sum(r["ShrinkEvents"] for r in sh)
-            return R("비해당", basis=f"축소 이벤트 {n0(ev)}건, 축소 직후 히트율이 평상시보다 {c.ts('a3_hit_drop')} 이상 낮은 에이전트 없음", charts=charts)
+            return R("비해당", basis=f"축소 이벤트 {n0(ev)}건. 축소 직후 캐시율이 평상시보다 낮다는 단측 검정(유의수준 {c.alpha:g})을 통과한 에이전트가 없다", charts=charts)
         total = sum(r["UpperBoundWasteUsd"] for r in flagged)
         fnd = " ".join(f"{r['Agent']}에서 같은 대화 안 Input이 직전보다 줄어든 호출이 {n0(r['ShrinkEvents'])}건이고, 축소 직후 히트율은 {f2(r['HitAfterShrink'])}로 평상시 {f2(r['HitNormal'])}보다 낮다." for r in flagged)
         return R("후보", fnd, waste=W(total, "Σ(축소 이벤트) [Cacheable(편집 지점 이전 공유 길이) − CacheTok] × (P_in − P_cache)",
@@ -412,7 +441,6 @@ def build_causes(c):
         if a_gate: return NO(a_gate_msg)
         gh = c.q("A5", "gap_hit")
         if not gh: return SKIP("연속 턴 첫 호출 간격을 계산할 수 없다")
-        drop = c.t("a5_hit_drop")
         flagged, total = [], 0.0
         for ag in sorted({r["Agent"] for r in gh}):
             rs = [r for r in gh if r["Agent"] == ag]
@@ -422,7 +450,7 @@ def build_causes(c):
             if not a or not out or a["FirstCalls"] < c.min_n: continue
             n_out = sum(r["FirstCalls"] for r in out)
             hit_out = sum(r["HitRate"] * r["FirstCalls"] for r in out) / n_out if n_out else 0
-            if a["HitRate"] - hit_out >= drop:
+            if hit_out < a["HitRate"] and p_rate_lower(a["HitRate"], a["FirstCalls"], hit_out, n_out) < c.alpha:
                 flagged.append((ag, a, out, hit_out))
                 total += sum(r["WasteUsd"] for r in out)
         main = max({r["Agent"] for r in gh}, key=lambda ag: sum(r["FirstCalls"] for r in gh if r["Agent"] == ag))
@@ -431,7 +459,7 @@ def build_causes(c):
               "fmt": "pct", "yMax": 1, "capLabels": True, "xName": "간격",
               "bins": [dict(label=r["Bucket"][3:], value=r["HitRate"], n=f"{n0(r['FirstCalls'])}회", **({"tone": "crit"} if not r["Bucket"].startswith("a.") else {})) for r in rs]}
         if not flagged:
-            return R("비해당", basis=f"보존 시간 밖 구간에서 히트율 하락이 {c.ts('a5_hit_drop')} 미만이다", charts=[ch])
+            return R("비해당", basis=f"보존 시간 밖 구간의 첫 호출 히트율이 안 구간보다 낮다는 단측 검정(유의수준 {c.alpha:g})을 통과한 에이전트가 없다", charts=[ch])
         fnd = " ".join(f"{ag}의 보존 시간 안 첫 호출 히트율은 {f2(a['HitRate'])}이고 그 밖 구간은 {f2(h)}이다." for ag, a, o, h in flagged)
         return R("해당", fnd, waste=W(total, "Σ(보존 시간 밖 첫 호출) Cacheable(S_a) × (P_in − P_cache) × (안쪽 히트율 − 구간 히트율)",
                                      "구간별 첫 호출 수 × 히트율 차이 × 캐시 가능 토큰 × 단가 차이"),
@@ -444,18 +472,20 @@ def build_causes(c):
         if g: return g
         if a_gate: return NO(a_gate_msg)
         rp, ep = c.q("A6", "rpm_hit"), c.q("A6", "endpoint_hit")
-        drop = c.t("a6_hit_drop")
         hot = []
         for ag in sorted({r["Agent"] for r in rp}):
             rs = [r for r in rp if r["Agent"] == ag]
             base = next((r for r in rs if r["RpmBucket"].startswith("a.")), None)
             for r in rs:
-                if base and not r["RpmBucket"].startswith("a.") and r["Calls"] >= c.min_n and base["HitRate"] - r["HitRate"] >= drop and r["WasteUsd"] > 0:
+                if (base and not r["RpmBucket"].startswith("a.") and r["Calls"] >= c.min_n and base["Calls"] >= c.min_n and r["WasteUsd"] > 0
+                        and p_rate_lower(base["HitRate"], base["Calls"], r["HitRate"], r["Calls"]) < c.alpha):
                     hot.append((ag, base, r))
         spread = []
         for ag in sorted({r["Agent"] for r in ep}):
-            rs = [r for r in ep if r["Agent"] == ag and r["Calls"] >= 30]
-            if len(rs) >= 2 and max(r["HitRate"] for r in rs) - min(r["HitRate"] for r in rs) >= drop:
+            rs = [r for r in ep if r["Agent"] == ag and r["Calls"] >= c.min_n]
+            hi = max(rs, key=lambda r: r["HitRate"]) if rs else None
+            lo = min(rs, key=lambda r: r["HitRate"]) if rs else None
+            if len(rs) >= 2 and p_rate_lower(hi["HitRate"], hi["Calls"], lo["HitRate"], lo["Calls"]) < c.alpha:
                 spread.append((ag, rs))
         main = max({r["Agent"] for r in rp} or {None}, key=lambda ag: sum(r["Calls"] for r in rp if r["Agent"] == ag)) if rp else None
         charts = []
@@ -464,7 +494,7 @@ def build_causes(c):
                            "fmt": "pct", "yMax": 1, "capLabels": True, "xName": "구간",
                            "bins": [dict(label=r["RpmBucket"][3:], value=r["HitRate"], n=f"{n0(r['Minutes'])}분", **({"tone": "crit"} if not r["RpmBucket"].startswith("a.") else {})) for r in rp if r["Agent"] == main]})
         if not hot and not spread:
-            return R("비해당", basis=f"기준 이하 구간 대비 요청이 집중된 구간의 히트율 하락이 {c.ts('a6_hit_drop')} 미만이고 엔드포인트별 히트율 차이도 작다", charts=charts)
+            return R("비해당", basis=f"요청이 집중된 구간의 히트율 하락과 엔드포인트별 히트율 차이 모두 단측 검정(유의수준 {c.alpha:g})을 통과하지 못했다", charts=charts)
         total = sum(r["WasteUsd"] for _, _, r in hot)
         parts = [f"{ag}의 히트율은 분당 {c.rpm_limit}건 이하 구간에서 {f2(b['HitRate'])}이고 {r['RpmBucket'][3:]} 구간에서 {f2(r['HitRate'])}이다." for ag, b, r in hot]
         parts += [f"{ag}는 엔드포인트별 히트율이 {f2(min(r['HitRate'] for r in rs))}–{f2(max(r['HitRate'] for r in rs))}로 갈린다." for ag, rs in spread]
@@ -590,7 +620,7 @@ def build_causes(c):
               "bins": [dict(label=f"{r['Bin'] / 10:.1f}", value=r["Docs"], **({"tone": "crit"} if r["Bin"] / 10 < (c.t("low_score") or 0.5) else {})) for r in sh]} if sh else None
         lod = rq.get("LowOrDupShare")
         if lod is None or lod < c.t("c3_low_or_dup"):
-            return R("비해당", basis=f"저점수·중복 문서 비율 {pc(lod or 0)} < 기준 {pc(c.t('c3_low_or_dup'))}", charts=[ch] if ch else None)
+            return R("비해당", basis=f"저점수·중복 문서 비율 {pc(lod or 0)} < 기준 {pc(c.t('c3_low_or_dup'))}. 반환 문서 대부분이 고점수다", charts=[ch] if ch else None)
         names = set((c.ts("search_tools") or "").split(","))
         carried = sum(r["CarriedUsd"] for r in c.q("C2", "result_carry") if r["ToolName"] in names)
         return R("후보", f"검색 {n0(rq['Searches'])}회가 문서 {n0(rq['ReturnedDocs'])}건(top_k 평균 {rq['AvgTopK']})을 돌려주고, 저점수 문서가 {pc(rq['LowScoreShare'])}, 같은 턴의 중복 문서가 {n0(rq['DupInTurn'])}건이다.",
@@ -607,14 +637,26 @@ def build_causes(c):
               "bins": [{"label": str(r["N"]) if r["N"] < 15 else "15+", "value": r["Turns"]} for r in nh]} if nh else None
         tot = sum(r["TailExcessUsd"] for r in tail)
         sh = max(r["TailCostShare"] or 0 for r in tail)
-        dups = c.q("D1", "dup_tool_calls")
-        dup_hi = [r for r in dups if r["DupRate"] >= c.t("d1_dup_rate") and r["DupCalls"] > 0]
+        dups = [r for r in c.q("D1", "dup_tool_calls") if r["DupCalls"] > 0]
+        # 꼬리 턴의 중복 호출 비율이 나머지 턴보다 높은가 (단측 검정)
+        dup_hi = []
+        dtr = c.q("D1", "dup_tail_vs_rest")
+        for ag in sorted({r["Agent"] for r in dtr}):
+            t_ = next((r for r in dtr if r["Agent"] == ag and r["Tail"]), None)
+            o_ = next((r for r in dtr if r["Agent"] == ag and not r["Tail"]), None)
+            if not t_ or not o_ or t_["ToolCalls"] < c.min_n or o_["ToolCalls"] < c.min_n or not t_["DupCalls"]:
+                continue
+            rt, ro = t_["DupCalls"] / t_["ToolCalls"], o_["DupCalls"] / o_["ToolCalls"]
+            if rt > ro and p_rate_lower(rt, t_["ToolCalls"], ro, o_["ToolCalls"]) < c.alpha:
+                dup_hi.append((ag, rt, ro))
         if sh < c.t("d1_tail_share"):
             return R("비해당", basis=f"꼬리 턴 비용 비중 {f2(sh)} < 기준 {c.ts('d1_tail_share')}", charts=[ch] if ch else None)
         t0 = max(tail, key=lambda r: r["TailCostShare"] or 0)
         fnd = f"호출 수 상위 5% 턴({n0(t0['TailTurns'])}개)이 {t0['Agent']} 비용의 {pc(t0['TailCostShare'])}를 쓴다. 턴당 호출 수는 p50 {t0['P50N']:g}, p95 {t0['P95N']:g}, 최대 {t0['MaxN']}이다."
         if dup_hi:
-            fnd += " 같은 턴에서 같은 인자로 반복된 tool 호출이 있다: " + ", ".join(f"{r['ToolName']} {pc(r['DupRate'])}" for r in dup_hi[:3]) + "."
+            fnd += " " + " ".join(f"{ag}의 꼬리 턴에서 같은 인자로 다시 부른 tool 호출 비율은 {pc(rt, 1)}이고 나머지 턴은 {pc(ro, 1)}이다." for ag, rt, ro in dup_hi)
+            if dups:
+                fnd += " 중복이 많은 tool은 " + ", ".join(f"{r['ToolName']}({pc(r['DupRate'])})" for r in dups[:3]) + "이다."
         elif not c.have_content:
             fnd += " tool 인자 해시(content)가 없어 중복 호출은 확인하지 못했다."
         return R("해당" if dup_hi else "후보", fnd, waste=W(tot, "꼬리 턴 비용 − 꼬리 턴 수 × 턴 비용 중앙값 (간이식)", "상위 5% 턴의 초과 비용 합계", True),
@@ -625,16 +667,16 @@ def build_causes(c):
         if not c.have_tools: return SKIP("execute_tool span이 없다")
         rt = c.q("D2", "round_tools")
         if not rt: return SKIP("tool 라운드를 계산할 수 없다")
-        thr = c.t("d2_serial_share")
         ch = hbar("순차 연쇄 턴 비율", "쿼리: 라운드당 Tool 수 (D2) · tool 라운드 3회 이상이면서 라운드마다 tool이 1개",
                   [{"label": r["Agent"], "value": r["SerialChainShare"], "aside": f"라운드당 tool {r['AvgToolsPerRound']}개"} for r in rt], "pct",
-                  {"value": thr, "dir": "above", "label": f"기준 {thr:g}"}, nice_max(max(r["SerialChainShare"] for r in rt)))
-        hot = [r for r in rt if r["SerialChainShare"] >= thr]
+                  None, nice_max(max(r["SerialChainShare"] for r in rt)))
+        hot = [r for r in rt if r["SerialChainShare"] > 0]
         if not hot:
-            return R("비해당", basis=f"순차 연쇄 턴 비율 최대 {pc(max(r['SerialChainShare'] for r in rt), 1)} < 기준 {pc(thr)}", charts=[ch])
-        return R("후보", " ".join(f"{r['Agent']}의 턴 {pc(r['SerialChainShare'], 1)}가 tool을 한 번에 하나씩 3회 이상 부른다." for r in hot),
-                 waste=W(sum(r["ChainWasteUsdUpper"] for r in hot), "연쇄 길이 k인 턴마다 (k − 1) × 해당 라운드들의 평균 InTok × P_eff", "tool 호출 라운드 비용의 (k−1)/k (상한)", True),
-                 diff=["[C]로 연속 tool이 서로의 결과를 인자로 쓰는지 확인한다. 의존 관계가 있으면 정상이다."], charts=[ch])
+            return R("비해당", basis="tool을 한 번에 하나씩 3회 이상 부르는 턴이 없다", charts=[ch])
+        # 수치 기준이 없다. 순차 연쇄가 의존 관계 때문인지는 [C]로만 알 수 있어 판정을 보류하고 값만 남긴다.
+        upper = sum(r["ChainWasteUsdUpper"] for r in hot)
+        return R("판정 보류", basis=" ".join(f"{r['Agent']}의 턴 {pc(r['SerialChainShare'], 1)}가 tool을 한 번에 하나씩 3회 이상 부른다." for r in hot)
+                 + f" 연쇄 라운드 비용의 (k−1)/k 상한은 {usd(upper)}이다. 수치 기준이 없어 [C]로 연속 tool이 서로의 결과를 인자로 쓰는지 확인해 판정한다", charts=[ch])
     F["D2"] = D2
 
     def D3():
@@ -647,13 +689,13 @@ def build_causes(c):
             s["share"] = max(s["share"], r["ShortCostShare"] or 0)
         rows = [dict(label=ag, value=sh[ag]["share"], aside=f"다양성 {so[ag]['OutputDiversity'] if ag in so else '—'}") for ag in sh]
         ch = hbar("에이전트별 짧은 출력 호출의 비용 비중", "쿼리: 짧은 출력 호출 비중 (D3) · 가시 출력 50 tok 미만, tool 호출 제외", rows, "pct", None, nice_max(max([r["value"] for r in rows] or [0])))
-        hit = [ag for ag in so if so[ag]["OutputDiversity"] <= c.t("d3_diversity") and sh.get(ag, {}).get("share", 0) >= c.t("d3_short_cost")]
+        hit = [ag for ag in so if so[ag].get("ShortCalls")]
         if not hit:
-            return R("비해당", basis="짧은 출력 호출의 비용 비중이 작거나 출력이 다양하다", charts=[ch])
-        total = sum(so[ag]["ShortCost"] for ag in hit)
-        return R("해당", " ".join(f"{ag}의 짧은 출력 호출 {n0(so[ag]['ShortCalls'])}건이 비용의 {pc(sh[ag]['share'])}를 쓰고, 출력의 종류는 {n0(so[ag]['DistinctOutputs'])}가지다(다양성 {so[ag]['OutputDiversity']})." for ag in hit),
-                 waste=W(total, "해당 호출의 비용 전체 (규칙으로 대체할 때의 상한)", "짧은 출력 호출 비용 합계", True),
-                 diff=["그 호출이 상위 모델이면 E1과 겹친다. 규칙으로 처리할 수 있는지는 [S]로 확인한다."], charts=[ch])
+            return R("비해당", basis="가시 출력이 짧은 호출이 없다", charts=[ch])
+        # 수치 기준이 없다. "비용 비중이 의미 있고 다양성이 낮다"는 값을 남기고 [S]로 규칙 처리 가능 여부를 확인한다.
+        hit.sort(key=lambda ag: so[ag]["ShortCost"], reverse=True)
+        return R("판정 보류", basis=" ".join(f"{ag}의 짧은 출력 호출 {n0(so[ag]['ShortCalls'])}건이 비용의 {pc(sh.get(ag, {}).get('share', 0))}를 쓰고, 출력의 종류는 {n0(so[ag]['DistinctOutputs'])}가지다(다양성 {so[ag]['OutputDiversity']}, 비용 {usd(so[ag]['ShortCost'])})." for ag in hit[:3])
+                 + " 수치 기준이 없어 [S]로 규칙으로 처리할 수 있는 단계인지 확인해 판정한다", charts=[ch])
     F["D3"] = D3
 
     def D4():
@@ -661,7 +703,9 @@ def build_causes(c):
         dl = c.q("D4", "delegation")
         if not dl: return SKIP("위임 직전 상위 호출을 짝지을 수 없다")
         thr = c.t("d4_pass_ratio")
-        val = lambda r: r["P50PassRatioVar"] if r.get("P50PassRatioVar") is not None else r["P50PassRatio"]
+        dl = [r for r in dl if r.get("P50PassRatio") is not None]
+        if not dl: return HOLD("상위 에이전트의 S_a가 없어 가변 컨텍스트 대비 전달 비율을 계산할 수 없다 (config/agents.csv)")
+        val = lambda r: r["P50PassRatio"]
         ch = hbar("하위 에이전트별 위임 시 Input 전달 비율", "쿼리: 위임 시 Input 전달량 (D4) · (하위 첫 Input − S_sub) ÷ (상위 직전 Input − S_parent)",
                   [{"label": r["SubAgent"], "value": val(r), "aside": f"위임 {n0(r['Delegations'])}회"} for r in dl], "ratio", {"value": thr, "dir": "above", "label": f"기준 {thr:g}"}, nice_max(max(val(r) for r in dl)))
         hot = [r for r in dl if val(r) >= thr and r["Delegations"] >= c.min_n]
@@ -726,12 +770,12 @@ def build_causes(c):
     def E4():
         tr = c.q("E4", "truncation")
         if not tr: return SKIP("호출이 없다")
-        thr = c.t("e4_trunc_rate")
         ch = hbar("에이전트·모델별 잘림 비율", "쿼리: 출력 잘림 (E4) · finish_reasons length 또는 status incomplete", [{"label": f"{r['Agent']} · {r['Model']}", "value": r["TruncRate"], "aside": f"잘림 {n0(r['TruncCalls'])}건"} for r in tr], "pct",
-                  {"value": thr, "dir": "above", "label": f"기준 {thr:g}"}, nice_max(max(r["TruncRate"] for r in tr)))
-        hot = [r for r in tr if r["TruncRate"] >= thr and r["FollowUpAfterTrunc"] > 0 and r["Calls"] >= c.min_n]
+                  None, nice_max(max(r["TruncRate"] for r in tr)))
+        # 가이드의 "잘림이 반복되고"를 2건 이상으로 읽는다
+        hot = [r for r in tr if r["TruncCalls"] >= 2 and r["FollowUpAfterTrunc"] > 0]
         if not hot:
-            return R("비해당", basis=f"잘림 비율 최대 {pc(max(r['TruncRate'] for r in tr), 2)} < 기준 {pc(thr)} 이거나 후속 호출이 없다", charts=[ch])
+            return R("비해당", basis=f"잘림이 2건 이상이면서 후속 호출이 이어진 에이전트·모델이 없다 (잘림 {n0(sum(r['TruncCalls'] for r in tr))}건)", charts=[ch])
         rs = c.t("e4_reason_share")
         return R("해당", " ".join(f"{r['Agent']}({r['Model']})의 호출 {pc(r['TruncRate'], 1)}가 출력 상한에 걸려 끊기고, 그 뒤 후속 호출 {n0(r['FollowUpAfterTrunc'])}건이 이어졌다." + (f" 잘린 호출의 reasoning 비중이 {pc(r['TruncReasonShare'])}라 reasoning이 상한을 다 쓴 유형이다." if (r['TruncReasonShare'] or 0) >= rs else "") for r in hot),
                  waste=W(sum(r["TruncCost"] + r["FollowUpCost"] for r in hot), "Σ 잘린 호출 Cost + 잘림 때문에 생긴 후속 호출 Cost", "잘린 호출 비용 + 후속 호출 비용"), charts=[ch])
@@ -741,15 +785,15 @@ def build_causes(c):
     def F1():
         if not c.have_tools: return SKIP("execute_tool span이 없다")
         tf = c.q("F1", "tool_failures")
-        thr = c.t("f1_fail_rate")
         ch = hbar("tool별 실패율", "쿼리: Tool별 실패율 (F1)", [{"label": r["ToolName"], "value": r["FailRate"], "aside": f"{n0(r['Calls'])}회" + (f" · {r['SampleErr']}" if r["SampleErr"] else "")} for r in tf], "pct",
-                  {"value": thr, "dir": "above", "label": f"기준 {thr:g}"}, nice_max(max(r["FailRate"] for r in tf)))
-        hot = [r for r in tf if r["FailRate"] >= thr and r["Calls"] >= c.min_n]
+                  None, nice_max(max(r["FailRate"] for r in tf)))
+        # 실패율의 수치 기준은 두지 않는다. 실패가 반복된(2건 이상) tool이 있고 실패 턴이 정상 턴보다 비싸면 해당이다.
+        hot = sorted([r for r in tf if (r["Failed"] or 0) >= 2], key=lambda r: r["Failed"], reverse=True)
         fv = c.q("F1", "fail_vs_ok_turns")
         costlier = [a for a in {r["Agent"] for r in fv} if (lambda f, o: f and o and f["P50TurnCost"] > o["P50TurnCost"])(
             next((r for r in fv if r["Agent"] == a and r["HasFail"]), None), next((r for r in fv if r["Agent"] == a and not r["HasFail"]), None))]
         if not hot:
-            return R("비해당", basis=f"tool 실패율 최대 {pc(max(r['FailRate'] for r in tf), 1)} < 기준 {pc(thr)}", charts=[ch])
+            return R("비해당", basis=f"실패가 2건 이상인 tool이 없다 (tool 실패 {n0(sum(r['Failed'] or 0 for r in tf))}건)", charts=[ch])
         if not costlier:
             return R("후보", basis=f"{hot[0]['ToolName']} 실패율 {pc(hot[0]['FailRate'])}이지만 실패 턴이 정상 턴보다 비싸지 않다", charts=[ch])
         w = sum(r["WasteUsd"] for r in c.q("F1", "waste"))
@@ -761,13 +805,13 @@ def build_causes(c):
     def F2():
         lf = c.q("F2", "llm_failures")
         if not lf: return SKIP("호출이 없다")
-        thr = c.t("f2_fail_rate")
         ch = hbar("에이전트별 실패·재요청 추정 비율", "쿼리: LLM 호출 실패와 재요청 (F2)", [{"label": r["Agent"], "value": r["FailOrResendRate"], "aside": f"실패 {n0(r['FailedCalls'])} · 재요청 추정 {n0(r['Resends'])}"} for r in lf], "pct",
-                  {"value": thr, "dir": "above", "label": f"기준 {thr:g}"}, nice_max(max(r["FailOrResendRate"] for r in lf)))
-        hot = [r for r in lf if r["FailOrResendRate"] >= thr and r["Calls"] >= c.min_n]
+                  None, nice_max(max(r["FailOrResendRate"] for r in lf)))
+        # 가이드의 "실패 호출 비율이 높거나 재요청이 반복되면"에서 비율 기준은 없으므로 반복(2건 이상)만 본다
+        hot = [r for r in lf if (r["FailedCalls"] or 0) >= 2 or (r["Resends"] or 0) >= 2]
         if not hot:
-            return R("비해당", basis=f"실패·재요청 추정 비율 최대 {pc(max(r['FailOrResendRate'] for r in lf), 2)} < 기준 {pc(thr)}", charts=[ch])
-        return R("후보", " ".join(f"{r['Agent']}의 호출 {pc(r['FailOrResendRate'], 1)}가 실패했거나 직전과 거의 같은 Input의 재요청으로 보인다." for r in hot),
+            return R("비해당", basis="실패 호출과 재요청 추정 호출이 모두 2건 미만이다", charts=[ch])
+        return R("후보", " ".join(f"{r['Agent']}의 호출 중 실패 {n0(r['FailedCalls'])}건, 직전과 거의 같은 Input의 재요청 추정 {n0(r['Resends'])}건이 있다(호출의 {pc(r['FailOrResendRate'], 1)})." for r in hot),
                  waste=W(sum(r["FailedCost"] + r["ResendCost"] for r in hot), "토큰이 기록된 실패 호출 Cost + 재요청 호출 Cost", "실패 호출 비용 + 재요청 추정 호출 비용"),
                  diff=["재요청은 Input 차이 기반의 추정이다. 출력 파싱 실패 뒤에 몰리면 [S]로 structured output 사용 여부를 확인한다.", "토큰이 기록되지 않은 실패(예: 429)는 비용보다 지연 문제다."], charts=[ch])
     F["F2"] = F2
@@ -776,16 +820,15 @@ def build_causes(c):
         if not c.have_conv: return NODATA("gen_ai.conversation.id 미기록")
         qr = c.q("F3", "quick_reinput")
         if not qr: return SKIP("대화 안 턴 간격을 계산할 수 없다")
-        thr = c.t("f3_quick_rate")
         ch = hbar("에이전트별 빠른 재입력 비율", f"쿼리: 빠른 재입력 비율 (F3) · 직전 턴 종료 후 {c.ts('quick_retry_sec')}초 안", [{"label": r["Agent"], "value": r["QuickRetryRate"], "aside": f"{n0(r['QuickTurns'])}턴"} for r in qr], "pct",
-                  {"value": thr, "dir": "above", "label": f"기준 {thr:g}"}, nice_max(max(r["QuickRetryRate"] for r in qr)))
-        hot = [r for r in qr if r["QuickRetryRate"] >= thr and r["Turns"] >= c.min_n]
+                  None, nice_max(max(r["QuickRetryRate"] for r in qr)))
+        hot = [r for r in qr if r["QuickTurns"] > 0]
         if not hot:
-            return R("비해당", basis=f"빠른 재입력 비율 최대 {pc(max(r['QuickRetryRate'] for r in qr), 1)} < 기준 {pc(thr)}", charts=[ch])
+            return R("비해당", basis=f"직전 턴 종료 후 {c.ts('quick_retry_sec')}초 안에 시작된 턴이 없다", charts=[ch])
+        # 수치 기준이 없고, 빠른 재입력이 꼭 재질문은 아니다. 값을 남기고 [C] 유사도로 판정한다.
         w = sum(r["WasteUsd"] for r in c.q("F3", "waste"))
-        return R("후보", " ".join(f"{r['Agent']}의 턴 {pc(r['QuickRetryRate'], 1)}가 직전 턴 종료 후 {c.ts('quick_retry_sec')}초 안에 시작된다." for r in hot),
-                 waste=W(w, "Σ(재질문 직전 턴) 턴 비용", "빠른 재입력 직전 턴의 비용 합계 ([T] 근사)", True),
-                 diff=["빠른 재입력이 꼭 재질문은 아니다. `quick_pairs`의 SpanId로 content_by_span을 받아 연속 사용자 메시지의 임베딩 유사도(≥ 0.85)를 계산해 확정한다."], charts=[ch])
+        return R("판정 보류", basis=" ".join(f"{r['Agent']}의 턴 {pc(r['QuickRetryRate'], 1)}({n0(r['QuickTurns'])}턴)가 직전 턴 종료 후 {c.ts('quick_retry_sec')}초 안에 시작된다." for r in hot)
+                 + f" 직전 턴 비용 합계는 {usd(w)}이다([T] 근사). 수치 기준이 없어 quick_pairs의 SpanId로 content_by_span을 받아 연속 사용자 메시지의 유사도로 재질문 여부를 확인해 판정한다", charts=[ch])
     F["F3"] = F3
 
     def F4():

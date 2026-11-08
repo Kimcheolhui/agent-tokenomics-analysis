@@ -29,6 +29,21 @@ SELECT ToolName, sum(Cnt) AS ToolCalls, coalesce(sum(Cnt - 1) FILTER (WHERE Cnt 
        round(coalesce(sum(Cnt - 1) FILTER (WHERE Cnt > 1), 0) * 1.0 / sum(Cnt), 3) AS DupRate
 FROM g GROUP BY ToolName ORDER BY DupCalls DESC
 
+-- @query dup_tail_vs_rest
+-- 꼬리 턴과 나머지 턴의 중복 tool 호출 수. 꼬리 턴 정의는 tail_turns와 같다(에이전트별 호출 수 순위).
+-- 빌더가 "꼬리 턴의 중복 비율 > 나머지 턴"을 단측 검정한다.
+WITH r AS (
+  SELECT OperationId, Agent, row_number() OVER (PARTITION BY Agent ORDER BY N DESC, TurnCost DESC) AS Rk,
+         count(*) OVER (PARTITION BY Agent) AS Cnt
+  FROM turn_cost),
+tl AS (SELECT OperationId, Agent, Rk <= ceil((1 - thrn('tail_pct')) * Cnt) AS Tail FROM r),
+g AS (
+  SELECT t.OperationId, t.ToolName, c.ArgsHash, count(*) AS Cnt
+  FROM tools t JOIN content c ON c.SpanId = t.SpanId AND c.OperationId = t.OperationId
+  WHERE c.ArgsHash IS NOT NULL GROUP BY 1, 2, 3)
+SELECT tl.Agent, tl.Tail, sum(g.Cnt) AS ToolCalls, coalesce(sum(g.Cnt - 1) FILTER (WHERE g.Cnt > 1), 0) AS DupCalls
+FROM g JOIN tl ON tl.OperationId = g.OperationId GROUP BY 1, 2 ORDER BY 1, 2
+
 -- @query repeat_turns
 -- content가 없을 때의 [T] 근사: 한 턴에서 같은 tool을 repeat_tool_calls회 이상 부른 턴
 WITH g AS (SELECT OperationId, ToolName, count(*) AS Cnt FROM tools GROUP BY 1, 2)

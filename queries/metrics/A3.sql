@@ -11,6 +11,10 @@ SELECT Agent, count(*) AS Calls, count(*) FILTER (WHERE Shrink) AS ShrinkEvents,
        count(*) FILTER (WHERE Compacted = 'true') AS CompactedCalls,
        round(avg(1.0 * CacheTok / InTok) FILTER (WHERE Shrink), 3) AS HitAfterShrink,
        round(avg(1.0 * CacheTok / InTok) FILTER (WHERE NOT coalesce(Shrink, false) AND CallIdx > 1), 3) AS HitNormal,
+       -- 단측 검정(축소 직후 캐시율 < 평상시)에 쓰는 표본 수와 표준편차
+       count(*) FILTER (WHERE NOT coalesce(Shrink, false) AND CallIdx > 1) AS NormalCalls,
+       round(stddev_samp(1.0 * CacheTok / InTok) FILTER (WHERE Shrink), 4) AS SdAfterShrink,
+       round(stddev_samp(1.0 * CacheTok / InTok) FILTER (WHERE NOT coalesce(Shrink, false) AND CallIdx > 1), 4) AS SdNormal,
        coalesce(sum(PrevInConv - InTok) FILTER (WHERE Shrink), 0) AS ShrunkInputTok,
        -- 상한: 편집 지점 이전 공유 길이를 모르므로 직전 prefix 전체가 히트했어야 한다고 본다. [C] 비교로 줄인다.
        round(coalesce(sum(greatest(cacheable(least(PrevInConv, InTok), MinTok, Round128) - CacheTok, 0)

@@ -179,4 +179,5 @@ let Content = AppGenAIContent | where TimeGenerated > T0;
 - Cacheable(x): 캐시 가능한 최대 토큰. x가 모델의 MinTok 미만이면 0이고, Round128 모델(GPT-5.5 이하)은 128 단위로 내림하며, 그 외 모델은 x를 그대로 쓴다. ([Learn](https://learn.microsoft.com/en-us/azure/foundry/openai/how-to/prompt-caching))
 - P\_eff: 실효 Input 단가 = (1 − r) × P\_in + r × P\_cache. r은 해당 에이전트의 캐시율(Σ CacheTok ÷ Σ InTok)이다. 고정 Input처럼 매 호출 반복되는 토큰의 낭비를 추정할 때 쓴다.
 - 판정 기준의 수치는 초기값이다. 고객 데이터의 분포를 보고 보정한다.
+- 수치 없이 "낮으면", "높으면"으로 적은 판정은 근거 없는 수치를 정하지 않는다. 데이터 안에 비교할 기준 집단이 있으면(A3, A5, A6, D1) 단측 검정(유의수준 0.01)으로 차이가 우연으로 보기 어려운지만 보고, 크기는 낭비 추정으로 보인다. "반복되면"은 2건 이상으로 읽는다. 기준 집단도 없으면(D2, D3, F3) 지표 값을 기록하고 \[C\]·\[S\] 확인으로 판정한다.
 
