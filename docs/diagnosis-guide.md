@@ -8,9 +8,14 @@
 
 ### 진단 흐름
 
-1. 섹션 2의 증상표에서 관찰된 증상의 후보 원인을 고른다.
-2. 섹션 3에서 해당 항목의 지표를 산출한다.
-3. 판정 기준과 감별로 원인을 확정하고, 낭비 추정식으로 크기를 매긴다.
+1. **사전 점검.** 아래 "사전 점검" 표의 항목을 확인한다. 통과하지 못한 항목은 영향받는 원인을 "계측 부재"로 기록하고 넘어간다.
+2. **공통 정의 준비.** "공통 쿼리 정의"의 `ModelParams`에 고객이 쓰는 모델의 단가와 캐시 파라미터를 채운다.
+3. **S_a 측정.** 섹션 3-B 측정법으로 에이전트별 고정 Input 토큰 S_a를 구한다. A 범주 지표 대부분과 B 공통 지표가 S_a를 입력으로 받으므로 A·B 지표보다 먼저 한다. 아래 "S_a를 쓰는 지점" 표를 본다.
+4. 섹션 2의 증상표에서 관찰된 증상의 후보 원인을 고른다.
+5. 섹션 3에서 해당 항목의 지표를 산출한다.
+6. 판정 기준과 감별로 원인을 확정하고, 낭비 추정식으로 크기를 매긴다.
+
+데이터를 매번 Log Analytics에서 쿼리하지 않고 CSV로 한 번 내려 로컬에서 산출하는 방법은 `docs/data-contract.md`에 있다. 이 가이드의 KQL은 같은 지표를 정의하는 기준이고, 로컬 산출은 `queries/metrics/`의 SQL이 같은 정의를 따른다.
 
 ### 분석 단위
 
@@ -55,7 +60,7 @@
 
 gen\_ai 속성은 아직 Development 단계라 이름이 바뀐다. 예를 들어 `cache_creation`이 `cache_write`로 바뀌었다. ([OTel GenAI registry](https://github.com/open-telemetry/semantic-conventions-genai/blob/main/docs/registry/attributes/gen-ai.md)) 그래서 진단 전에 실제로 쌓이는 키를 먼저 확인한다.
 
-진단 전 사전 점검으로, 하단 쿼리를 통해 LLM 호출(chat) span에 실제로 기록되는 **속성 키**를 확인한다. 결과에는 키별로 그 키가 들어 있는 span 수가 나온다.
+사전 점검 P1~P4, P9에 쓰는 아래 쿼리로 LLM 호출(chat) span에 실제로 기록되는 **속성 키**를 확인한다. 결과에는 키별로 그 키가 들어 있는 span 수가 나온다.
 
 ```kusto
 AppDependencies
@@ -67,6 +72,37 @@ AppDependencies
 ```
 
 `cache_read`나 `reasoning` 키가 없으면 그 키를 쓰는 3장 지표는 산출할 수 없다(cache\_read: A의 캐시율·달성률과 A1·A5·A6 히트율, reasoning: E2 Reasoning 비중과 E1·D3의 가시 출력). 이 경우 진단 결과에 "계측 부재"로 기록한다.
+
+### 사전 점검
+
+진단을 시작하기 전에 아래 항목을 확인한다. 항목마다 실패했을 때 산출할 수 없게 되는 지표가 정해져 있다. 점검 결과는 보고서의 판정(`계측 부재`)과 점검 범위(`meta.sources`)에 그대로 옮긴다.
+
+| # | 점검 항목 | 확인 방법 | 실패하면 영향받는 지표 |
+| --- | --- | --- | --- |
+| P1 | 속성 키 `cache_read` 수집 | 위 속성 키 쿼리, 또는 로컬 `instrumentation.WithCacheRead` | A 공통 캐시율·달성률, A1·A5·A6 히트율 |
+| P2 | 속성 키 `reasoning` 수집 | 같은 쿼리, `WithReasoning` | E2 Reasoning 비중, E1·D3의 가시 출력 |
+| P3 | 속성 키 `gen_ai.conversation.id` 수집 | 같은 쿼리, `WithConvId` | C1 전체, F3 빠른 재입력 비율, 대화 기준 지표 |
+| P4 | `gen_ai.agent.name` 이 chat span에 기록되는가 | `WithAgentOwner`와 `Agent` 컬럼 비교 | B1·B4·D4의 에이전트 귀속. 기록되지 않으면 호출이 루트 에이전트로 집계된다 |
+| P5 | `finish_reasons` 의 tool 호출 값 | `Calls \| summarize count() by Finish` | D1·D2·D3·E1·E4·F2의 호출 유형 분류. 쿼리는 `tool_calls`를 가정한다 |
+| P6 | 턴 1개 = trace 1개 | 아래 "턴·trace 점검" 쿼리 | 턴 단위 지표 전체 (CallIdx, 턴 비용, 꼬리 비중) |
+| P7 | `AppGenAIContent` 접근과 content recording | 테이블이 비어 있지 않은가, Privileged Monitoring Data Reader 역할 | [C] 지표 전체: A1·A2 변형 수, B1~B3 정의 크기, C2 결과 크기, D1 중복, D3 다양성, F3 메시지 |
+| P8 | 응답 모델명이 `ModelParams`와 일치 | 로컬 `unpriced_calls`, 또는 `Calls \| where isnull(PIn)` | 일치하지 않는 호출은 `Cost`가 비어 비용 합계에서 조용히 빠진다 |
+| P9 | `gen_ai.request.max_tokens` 기록 | `WithMaxTokens` | E3 max_tokens 미설정 비율. 미기록과 미설정을 구분할 수 없다 |
+
+**쿼리: 턴·trace 점검.** invoke_agent span이 trace당 몇 개인지, 한 trace가 여러 대화를 묶는지 센다. 대화 전체를 trace 하나로 묶는 앱은 `TracesWithMultiConv`가 크게 나오고, 이 경우 턴 단위 지표가 틀어진다. 반대로 한 턴을 여러 trace로 나누는 경우는 텔레메트리로 판별할 수 없으므로 \[S\]로 앱 구조를 확인한다.
+
+```kusto
+union AppDependencies, AppRequests
+| where TimeGenerated > ago(1d)
+| where tostring(Properties["gen_ai.operation.name"]) == "invoke_agent"
+| summarize InvokeSpans = count(), Convs = dcount(tostring(Properties["gen_ai.conversation.id"])) by OperationId
+| summarize Traces = count(), P50Spans = percentile(InvokeSpans, 50), P99Spans = percentile(InvokeSpans, 99),
+            TracesWithMultiConv = countif(Convs > 1)
+```
+
+이 쿼리는 실제 Log Analytics에서 실행해 확인하지 않았다.
+
+점검에서 `cache_read`나 `reasoning` 키가 없으면 해당 지표는 "계측 부재"로 기록한다. P6가 실패하면 턴 단위 지표는 신뢰할 수 없으므로 앱 구조를 확인하고 진단 범위를 조정한다.
 
 ### 모델별 캐시 파라미터 (Azure OpenAI)
 
@@ -419,6 +455,26 @@ Calls
 ## B. 고정 Input 비대
 
 고정 Input S\_a는 에이전트 a의 모든 LLM 호출에 반복해서 실린다. 그래서 낭비는 "줄일 수 있는 토큰 × 호출 수 × P\_eff"로 커진다. 캐시가 잘 맞으면 P\_eff가 P\_cache에 가까워져 영향이 작아지므로, 항상 A의 결과와 함께 본다.
+
+### S\_a를 쓰는 지점
+
+S\_a는 A 범주와 B 범주의 지표 대부분이 입력으로 받는다. 아래 지점은 S\_a 없이 산출할 수 없으므로 3-B 측정을 먼저 한다.
+
+| 지점 | S\_a를 쓰는 방식 |
+| --- | --- |
+| A 공통: 캐시 달성률 | 턴 첫 호출의 이론 캐시 가능량 Cacheable(S\_a) |
+| A1 | 보존 시간 내 첫 호출 조건 S\_a ≥ MinTok, 낭비 추정 |
+| A2 | 낭비 추정 Cacheable(S\_a) |
+| A4 | S\_a < MinTok 판정 |
+| A5 | 낭비 추정 Cacheable(S\_a) |
+| A6 | 낭비 추정 Cacheable(S\_a) |
+| B 공통: 고정 Input 비용 비중 | S\_a × LLM 호출 수 × P\_eff |
+| B4 | 하위 에이전트와 상위 에이전트의 S\_a 비교, 낭비 추정 |
+
+S\_a를 구하는 방법마다 정확도와 준비물이 다르다.
+
+- 측정법 1(실험 호출)은 고객 배포에 직접 요청을 보내야 하므로 텔레메트리만으로는 할 수 없다. 사전 준비 항목으로 따로 잡는다.
+- 측정법 3(턴 첫 호출 InTok 1백분위수)은 하한 근사다. 실제 S\_a보다 작게 나오므로, 이 값으로 구한 낭비 추정은 낮게 나온다. 보고서에 근사값임을 밝힌다.
 
 ### B 공통: S\_a 측정법
 
