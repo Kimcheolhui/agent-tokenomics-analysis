@@ -3,12 +3,14 @@
 //! sensitive: false
 // 에이전트별 최신 ToolDefinitions를 tool 단위로 펼쳐 정의 크기와 description 크기만 내린다.
 // B2(장황한 Tool schema) 비교와 B1 정의 tool 목록에 쓴다. 설명 원문은 내리지 않는다.
+// 정의가 배열이 아닌 행은 20-content-digest와 같이 건너뛴다(형식은 02-precheck-content로 확인한다).
 // 기간을 일 단위로 쪼개 돌리면 날짜마다 1세트가 나온다. 로컬에서 CapturedAt 최대값을 쓴다.
 let T0 = datetime(2026-11-01);
 let T1 = datetime(2026-11-02);
 AppGenAIContent
 | where TimeGenerated >= T0 and TimeGenerated < T1
 | where isnotempty(ToolDefinitions)
+| where gettype(parse_json(ToolDefinitions)) == "array"
 | summarize arg_max(TimeGenerated, ToolDefinitions) by AgentName
 | mv-expand T = parse_json(ToolDefinitions)
 | project

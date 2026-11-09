@@ -40,9 +40,15 @@ Foundry 프로젝트에 연결된 Application Insights 텔레메트리로 Agent�
 
 ### 1. 사전 점검
 
-`references/guide-common.md`의 "사전 점검" 표(P1–P9)를 따른다. 점검이 실패한 항목은 영향받는 원인이 `계측 부재`가 되므로 먼저 사용자에게 알린다.
+`references/guide-common.md`의 "사전 점검" 표(P1–P11)를 따른다. 점검이 실패한 항목은 영향받는 원인이 `계측 부재`가 되므로 먼저 사용자에게 알린다.
 
-`queries/export/00-precheck-keys.kql`을 포털 Logs에서 실행해 `cache_read`, `reasoning`, `conversation.id` 키가 쌓이는지 본다. **턴 1개 = trace 1개** 가정은 가이드의 "턴·trace 점검" 쿼리로 확인한다. 이 가정이 깨지면 턴 단위 지표가 틀어지므로 진단 범위를 조정한다.
+사전 점검 쿼리 3개를 포털 Logs에서 실행한다(`export.py --only precheck-keys,precheck-sampling,precheck-content`도 된다). 기본 추출에는 들어가지 않는다.
+
+- `00-precheck-keys.kql`: chat span에 `gen_ai.usage.*`, `cache_read`, `reasoning`, `conversation.id` 키가 쌓이는지 본다.
+- `01-precheck-sampling.kql`: `MaxItemCount`가 1보다 크면 샘플링이 있다. 지표는 `ItemCount`를 보정하지 않으므로 호출 수와 비용이 작게 나온다고 사용자에게 알린다.
+- `02-precheck-content.kql`: `AppGenAIContent`의 모양을 본다. `MaxRowsPerSpan`이 1보다 크거나 `ToolDefsTypes`가 `["array"]`가 아니면 `content_digest`·`tool_schemas`가 맞지 않으므로 추출 전에 쿼리를 고친다. `BilledMB`는 하루 수집량이다. Basic 테이블은 스캔량으로 과금되고 `content_digest`·`tool_schemas`가 날마다 이만큼 스캔하므로, 기간 전체의 스캔량을 사용자에게 알린다.
+
+**턴 1개 = trace 1개** 가정은 추출 뒤 `queries/views.sql`의 `turn_trace_check` 뷰로 확인한다(`run_metrics.py`가 `checks`에 넣는다). 이 가정이 깨지면 턴 단위 지표가 틀어지므로 진단 범위를 조정한다.
 
 ### 2. 추출
 

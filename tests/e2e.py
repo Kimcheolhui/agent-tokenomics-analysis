@@ -6,6 +6,7 @@ duckdb가 있는 인터프리터로 실행한다:   python3 tests/e2e.py
   full         모든 데이터. 심어 둔 문제가 기대한 판정 이상으로 잡혀야 한다
   no-optional  retrieval, content_digest, tool_schemas가 없는 경우. 오류 없이 끝나야 한다
   no-instr     cache_read, reasoning, conversation.id가 없는 경우. 해당 원인이 `계측 부재`여야 한다
+추출 KQL 검사는 node와 tests/kql/node_modules가 있을 때만 돈다(설치: cd tests/kql && npm install).
 """
 import csv, json, pathlib, shutil, subprocess, sys, tempfile
 
@@ -73,6 +74,13 @@ def main():
     print("\n[skill 동기화]")
     rc, out = sh([PY, str(REPO / "scripts" / "build_skill.py"), "--check"])
     ok(rc == 0, "skill 폴더가 원본과 같다" + ("" if rc == 0 else f"\n{out}"))
+
+    print("\n[추출 KQL 문법·스키마]")
+    if shutil.which("node") and (REPO / "tests" / "kql" / "node_modules").exists():
+        rc, out = sh(["node", str(REPO / "tests" / "kql" / "check_kql.js")])
+        ok(rc == 0, "queries/export/*.kql이 Kusto 파서 검사를 통과하고 결과 컬럼이 //! columns와 같다" + ("" if rc == 0 else f"\n{out}"))
+    else:
+        print("  SKIP node 또는 tests/kql/node_modules가 없다")
 
     with tempfile.TemporaryDirectory(prefix="tokenomics_e2e_") as t:
         base = pathlib.Path(t) / "base"

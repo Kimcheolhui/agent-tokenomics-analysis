@@ -62,7 +62,7 @@ gen\_ai 속성은 아직 Development 단계라 이름이 바뀐다. 예를 들�
 
 사전 점검 P1~P4, P9에 쓰는 아래 쿼리로 LLM 호출(chat) span에 실제로 기록되는 **속성 키**를 확인한다. 결과에는 키별로 그 키가 들어 있는 span 수가 나온다.
 
-추출 쿼리: `queries/export/00-precheck-keys.kql`.
+추출 쿼리: `queries/export/00-precheck-keys.kql`. 아래 P10·P11은 `01-precheck-sampling.kql`, `02-precheck-content.kql`로 확인한다. 세 쿼리는 기본 추출에 들어가지 않는다.
 
 `cache_read`나 `reasoning` 키가 없으면 그 키를 쓰는 3장 지표는 산출할 수 없다(cache\_read: A의 캐시율·달성률과 A1·A5·A6 히트율, reasoning: E2 Reasoning 비중과 E1·D3의 가시 출력). 이 경우 진단 결과에 "계측 부재"로 기록한다.
 
@@ -81,6 +81,8 @@ gen\_ai 속성은 아직 Development 단계라 이름이 바뀐다. 예를 들�
 | P7 | `AppGenAIContent` 접근과 content recording | 테이블이 비어 있지 않은가, Privileged Monitoring Data Reader 역할 | [C] 지표 전체: A1·A2 변형 수, B1~B3 정의 크기, C2 결과 크기, D1 중복, D3 다양성, F3 메시지 |
 | P8 | 응답 모델명이 `ModelParams`와 일치 | 로컬 `unpriced_calls`, 또는 `Calls \| where isnull(PIn)` | 일치하지 않는 호출은 `Cost`가 비어 비용 합계에서 경고 없이 빠진다 |
 | P9 | `gen_ai.request.max_tokens` 기록 | `WithMaxTokens` | E3 max_tokens 미설정 비율. 미기록과 미설정을 구분할 수 없다 |
+| P10 | 샘플링이 없는가 | `queries/export/01-precheck-sampling.kql`의 `MaxItemCount` = 1 | 호출 수와 비용 합계 전체. 지표는 `ItemCount`를 보정하지 않으므로 샘플링이 있으면 작게 나온다 |
+| P11 | `AppGenAIContent`가 span당 1행이고 `ToolDefinitions`가 배열인가 | `queries/export/02-precheck-content.kql`의 `MaxRowsPerSpan` = 1, `ToolDefsTypes` = `["array"]` | `content_digest`의 span 단위 지표(A1·A2·C2·D1·D3), `tool_schemas`의 B1·B2 |
 
 **쿼리: 턴·trace 점검.** invoke_agent span이 trace당 몇 개인지, 한 trace가 여러 대화를 묶는지 센다. 대화 전체를 trace 하나로 묶는 앱은 `TracesWithMultiConv`가 크게 나오고, 이 경우 턴 단위 지표가 틀어진다. 반대로 한 턴을 여러 trace로 나누는 경우는 텔레메트리로 판별할 수 없으므로 \[S\]로 앱 구조를 확인한다.
 

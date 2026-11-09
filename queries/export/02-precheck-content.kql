@@ -1,0 +1,27 @@
+//! name: precheck-content
+//! columns: Rows,Spans,MaxRowsPerSpan,RowsWithToolDefs,ToolDefsTypes,ToolDefKeys,BilledMB
+//! sensitive: false
+// AppGenAIContent의 모양과 쿼리 비용을 확인한다. 원문은 읽지 않고 개수, 형식, 키 이름만 낸다.
+// MaxRowsPerSpan이 1보다 크면 span 하나가 여러 행으로 기록된다. content_digest의 행이 span 단위가 아니게 된다.
+// ToolDefsTypes가 ["array"]가 아니면 20-content-digest와 21-tool-schemas가 tool 이름을 읽지 못한다.
+// ToolDefKeys는 정의 배열 첫 원소의 최상위 키다. "name"이 있으면 OTel 형식, "function"이 있으면 OpenAI 형식이다.
+// BilledMB는 하루치 수집량이다. Basic 테이블 쿼리는 스캔한 양으로 과금되고,
+// AppGenAIContent를 읽는 추출 쿼리(20, 21)가 날마다 이만큼씩 스캔한다.
+let T0 = datetime(2026-11-01);
+let T1 = datetime(2026-11-02);
+let C = AppGenAIContent
+    | where TimeGenerated >= T0 and TimeGenerated < T1;
+let PerSpan = C
+    | summarize N = count() by TraceId, SpanId;
+let Defs = C
+    | where isnotempty(ToolDefinitions)
+    | take 200
+    | extend D = parse_json(ToolDefinitions)
+    | extend DT = gettype(D), E = iff(gettype(D) == "array", D[0], D);
+C
+| summarize Rows = count(), RowsWithToolDefs = countif(isnotempty(ToolDefinitions)), BilledMB = round(sum(_BilledSize) / 1e6, 1)
+| extend Spans          = toscalar(PerSpan | count),
+         MaxRowsPerSpan = toscalar(PerSpan | summarize max(N)),
+         ToolDefsTypes  = toscalar(Defs | summarize make_set(DT)),
+         ToolDefKeys    = toscalar(Defs | mv-expand K = bag_keys(E) | summarize make_set(tostring(K)))
+| project Rows, Spans, MaxRowsPerSpan, RowsWithToolDefs, ToolDefsTypes, ToolDefKeys, BilledMB
