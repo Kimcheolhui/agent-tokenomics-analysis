@@ -25,7 +25,7 @@
 | `docs/telemetry-reference.md` | 공식 문서(OTel GenAI 규약, Azure Monitor 테이블, Foundry)와 대조한 결과. 고친 가정과 확인하지 못한 것 | — |
 | `skill/agent-tokenomics-diagnosis/` | 완성된 Agent skill. `SKILL.md`만 직접 편집하고 나머지는 `scripts/build_skill.py`로 생성한다 | — |
 | `tests/e2e.py` | 합성 데이터로 skill 스크립트를 처음부터 끝까지 검증한다 | — |
-| `tests/kql/` | 추출 KQL 오프라인 검사기. Kusto 파서로 공식 테이블 스키마(`schema.json`)에 대해 문법·컬럼을 보고, 결과 컬럼을 `//! columns`와 맞춘다 | — |
+| `scripts/kql/` | 추출 KQL 오프라인 검사기(node 필요, 선택). skill에도 들어간다. Kusto 파서로 공식 테이블 스키마(`schema.json`)에 대해 문법·컬럼을 보고, 결과 컬럼을 `//! columns`와 맞춘다 | — |
 
 진단은 Log Analytics에서 CSV를 한 번 내린 뒤 로컬에서 산출한다. 쿼리를 매번 실행하지 않는다. 지표 산출 쿼리는 `queries/metrics/*.sql` 한 곳에만 있다. 가이드는 쿼리 이름과 SQL 위치만 적고 SQL을 옮겨 적지 않는다. KQL은 로그를 내려받는 `queries/export/*.kql`에만 있다.
 
@@ -84,7 +84,7 @@ python3 scripts/export.py --workspace <GUID> --from 2026-10-20 --to 2026-11-03  
 python3 scripts/run_metrics.py --root . --out out/metrics.json                      # 지표
 python3 scripts/build_report.py --metrics out/metrics.json --root . --out out/report.html
 python3 tests/e2e.py                                                                # 종단 검증 (duckdb 필요)
-(cd tests/kql && npm install) && node tests/kql/check_kql.js                        # 추출 KQL 검사 (e2e도 설치돼 있으면 돌린다)
+(cd scripts/kql && npm install) && node scripts/kql/check_kql.js                       # 추출 KQL 검사 (e2e도 설치돼 있으면 돌린다)
 python3 scripts/build_skill.py                                                      # skill 폴더 재생성 (--check로 동기화 확인)
 ```
 
@@ -97,7 +97,7 @@ python3 scripts/build_skill.py                                                  
 - `gen_ai.response.finish_reasons`는 OTel 규약상 문자열 배열이고 OTel 예시의 tool 호출 값은 `tool_calls`다(`docs/telemetry-reference.md`). 고객 환경의 실제 값은 확인해야 한다.
 - 턴 1개 = trace 1개 가정을 고객 앱에서 확인해야 한다.
 - gen_ai 속성은 OTel에서 아직 Development 단계라 이름이 바뀔 수 있다. `cache_creation`은 이미 `cache_write`로 바뀌었다.
-- **추출 KQL 11개는 실제 Log Analytics에서 실행해 보지 않았다.** 문법과 컬럼 이름은 Kusto 파서로 오프라인 검사했다(2026-11-09, `tests/kql/`). 속성 값의 실제 형식과 행 수는 확인하지 못했다. DuckDB 쪽(뷰·지표 SQL·빌더)은 합성 데이터로만 검증했다. 합성 데이터는 내가 심은 문제만 검증하며, 실제 텔레메트리의 모양과 다를 수 있다.
+- **추출 KQL 11개는 실제 Log Analytics에서 실행해 보지 않았다.** 문법과 컬럼 이름은 Kusto 파서로 오프라인 검사했다(2026-11-09, `scripts/kql/`). 속성 값의 실제 형식과 행 수는 확인하지 못했다. DuckDB 쪽(뷰·지표 SQL·빌더)은 합성 데이터로만 검증했다. 합성 데이터는 내가 심은 문제만 검증하며, 실제 텔레메트리의 모양과 다를 수 있다.
 - 가이드에 수치 기준이 없는 판정 12개는 임의 수치를 두지 않았다(2026-11-09). 가이드 문구에서 유도(C3 0.5, E4·F1·F2 "반복" = 2건 이상, 턴 중간 캐시율 = A 공통 0.7), 기준 집단과의 단측 검정(A3·A5·A6·D1, 유의수준 0.01), 판정 보류(D2·D3·F3) 중 하나로 처리한다. 검정은 크기를 보지 않아 표본이 크면 작은 차이도 `후보`가 된다. 합성 데이터에서 심지 않은 A3·F2가 `후보`로 나온다. 목록은 `docs/metrics-notes.md`에 있다.
 - 가이드와 SQL이 다른 정의를 쓰는 곳 6개는 `docs/metrics-notes.md`에 있다. D4 전달 비율은 분모에서 S_parent를 빼도록 가이드 정의를 고쳤다(2026-11-09).
 

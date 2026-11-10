@@ -1,0 +1,6 @@
+{
+  "name": "kql-check",
+  "private": true,
+  "description": "queries/export/*.kql 오프라인 문법·스키마 검사",
+  "dependencies": { "@kusto/language-service-next": "12.4.1" }
+}

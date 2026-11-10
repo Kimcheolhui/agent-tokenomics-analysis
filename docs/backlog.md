@@ -12,7 +12,7 @@ CSV 스키마를 계약으로 정했다. 추출 수단 두 가지가 같은 스�
 - 로컬 산출은 DuckDB로 한다. `queries/views.sql`이 가이드의 "공통 쿼리 정의"에 1:1로 대응한다.
 - 25개 원인의 텔레메트리 지표가 기본 추출만으로 모두 산출된다. 원인별 필요 파일은 계약 문서의 표에 있다.
 
-검증 상태: `views.sql`은 합성 CSV로 실행해 확인했다. 검증 중에 하위 에이전트 오귀속(가이드 B1·D4의 주의사항)을 막는 `call_owner` 뷰를 추가했다. **추출 KQL은 실제 Log Analytics에서 실행해 보지 않았다.** 문법과 컬럼 이름은 Kusto 파서로 오프라인 검사했다(2026-11-09, `tests/kql/`). `AppGenAIContent` 컬럼명과 `AppRequests` union 동작을 고객 환경에서 확인해야 한다.
+검증 상태: `views.sql`은 합성 CSV로 실행해 확인했다. 검증 중에 하위 에이전트 오귀속(가이드 B1·D4의 주의사항)을 막는 `call_owner` 뷰를 추가했다. **추출 KQL은 실제 Log Analytics에서 실행해 보지 않았다.** 문법과 컬럼 이름은 Kusto 파서로 오프라인 검사했다(2026-11-09, `scripts/kql/`). `AppGenAIContent` 컬럼명과 `AppRequests` union 동작을 고객 환경에서 확인해야 한다.
 
 ## 2. REPORT 객체 스키마 분리 — 끝남 (2026-11-09)
 

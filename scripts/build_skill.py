@@ -63,6 +63,9 @@ def generate(dst):
     (dst / "scripts").mkdir(exist_ok=True)
     for f in RUNTIME_SCRIPTS:
         shutil.copy2(REPO / "scripts" / f, dst / "scripts" / f)
+    # 추출 KQL 검사기(node 필요, 선택). 설치된 node_modules는 복사하지 않는다
+    shutil.copytree(REPO / "scripts" / "kql", dst / "scripts" / "kql", dirs_exist_ok=True,
+                    ignore=shutil.ignore_patterns("node_modules", "package-lock.json", ".DS_Store"))
     for d in COPY_DIRS:
         shutil.copytree(REPO / d, dst / d, dirs_exist_ok=True, ignore=shutil.ignore_patterns("__pycache__", ".DS_Store"))
     (dst / "report").mkdir(exist_ok=True)
@@ -79,8 +82,9 @@ def generate(dst):
 def same(a, b):
     """두 디렉터리가 파일 단위로 같은가 (SKILL.md는 직접 편집하므로 비교에서 뺀다)."""
     diffs = []
-    fa = {p.relative_to(a) for p in a.rglob("*") if p.is_file() and "__pycache__" not in p.parts and p.name != ".DS_Store"}
-    fb = {p.relative_to(b) for p in b.rglob("*") if p.is_file() and "__pycache__" not in p.parts and p.name != ".DS_Store"}
+    skip = lambda p: "__pycache__" in p.parts or "node_modules" in p.parts or p.name in (".DS_Store", "package-lock.json")
+    fa = {p.relative_to(a) for p in a.rglob("*") if p.is_file() and not skip(p)}
+    fb = {p.relative_to(b) for p in b.rglob("*") if p.is_file() and not skip(p)}
     for r in sorted(fa | fb):
         if r.name == "SKILL.md":
             continue

@@ -38,7 +38,7 @@
 - **`ToolDefinitions`의 정확한 JSON 형식.** OTel 규약은 `[{"type":"function","name":…}]`이다. OpenAI 형식(`{"function":{"name":…}}`)도 받도록 썼지만 실제 값은 보지 못했다. `02-precheck-content.kql`의 `ToolDefsTypes`(배열인지)와 `ToolDefKeys`(첫 원소의 최상위 키)로 확인한다.
 - **`az monitor log-analytics query`로 Basic 테이블을 읽을 수 있는지.** 이 명령은 Query API를 쓴다. Basic 테이블 문서의 REST 예시는 Search API(`/search?timespan=…`)를 쓰고, Query API 지원 여부는 적혀 있지 않다. `export.py`가 `content_digest`에서 실패하면 포털에서 내려받는다.
 - **미리보기 기간의 변동.** `AppGenAIContent`는 2026-07에 공개 미리보기로 나왔다. 2026-09-30 이전에는 같은 속성이 `Properties`와 `AppGenAIContent`에 함께 기록될 수 있다고 알려져 있다. 이 폴더는 `AppGenAIContent`만 읽는다.
-- **추출 KQL의 실행 결과.** 11개 파일 모두 실제 Log Analytics에서 실행하지 못했다. 문법과 컬럼 이름은 Microsoft Kusto 파서(`@kusto/language-service-next` 12.4.1)로 공식 테이블 스키마에 대해 검사했다(`tests/kql/check_kql.js`). 오류 0건이고, 결과 컬럼 이름이 각 파일의 `//! columns`와 같다. 파서는 속성 값의 실제 형식, 행 수, 실행 시간, 서비스 쪽 제한을 보지 못한다.
+- **추출 KQL의 실행 결과.** 11개 파일 모두 실제 Log Analytics에서 실행하지 못했다. 문법과 컬럼 이름은 Microsoft Kusto 파서(`@kusto/language-service-next` 12.4.1)로 공식 테이블 스키마에 대해 검사했다(`scripts/kql/check_kql.js`). 오류 0건이고, 결과 컬럼 이름이 각 파일의 `//! columns`와 같다. 파서는 속성 값의 실제 형식, 행 수, 실행 시간, 서비스 쪽 제한을 보지 못한다.
 
 ## 확인한 문서
 

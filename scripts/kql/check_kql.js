@@ -1,7 +1,8 @@
 // queries/export/*.kql을 Microsoft Kusto 파서(@kusto/language-service-next)로 오프라인 검사한다.
 // 1) 문법·의미 오류(없는 컬럼, 함수 인자 형식 등)  2) 결과 컬럼과 //! columns 지시자의 일치.
 // 테이블 스키마는 schema.json(공식 테이블 레퍼런스)을 쓴다. 실행 결과는 보장하지 않는다.
-// 사용: (cd tests/kql && npm install) && node tests/kql/check_kql.js
+// skill 폴더에서도 같은 상대 경로로 동작한다(scripts/kql/ 기준 두 단계 위에 queries/export가 있다).
+// 사용: (cd scripts/kql && npm install) && node scripts/kql/check_kql.js
 const fs = require('fs');
 const path = require('path');
 require('@kusto/language-service-next/bridge.js');

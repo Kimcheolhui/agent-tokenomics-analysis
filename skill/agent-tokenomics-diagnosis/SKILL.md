@@ -60,6 +60,10 @@ python3 <skill>/scripts/export.py --workspace <GUID> --from 2026-10-20 --to 2026
 - 기본 추출에는 고객 프롬프트 원문이 없다. 해시와 길이만 내린다.
 - `az` 권한이 없으면 `queries/export/*.kql`을 포털에 붙여 넣고 CSV로 내보내 같은 폴더 구조에 둔다. 스키마는 `references/data-contract.md`다.
 - 하루 분량이 10만 행을 넘으면(포털) 또는 50만 행에 가까우면(API) 스크립트가 경고한다. 그 날을 시간 단위로 쪼갠다.
+- **추출 쿼리를 고쳤으면 실행 전에 검사한다.** 사전 점검 결과(예: `ToolDefinitions`가 배열이 아님)에 맞춰 `queries/export/*.kql`을 수정한 경우, node가 있으면 아래 명령으로 문법, 컬럼 이름, 함수 인자, 결과 컬럼과 `//! columns`의 일치를 확인한다. Basic 테이블 쿼리는 실패해도 스캔량만큼 과금될 수 있어 실행 전 검사가 필요하다. 최초 1회는 `npm install`이 필요하다(약 10MB). node가 없으면 이 단계를 건너뛰고, 수정한 쿼리를 포털에서 먼저 하루치로 실행해 본다. 이 검사는 공식 테이블 스키마(`scripts/kql/schema.json`) 기준이며 속성 값의 형식, 행 수, 서비스 쪽 제한은 확인하지 못한다.
+  ```bash
+  (cd <skill>/scripts/kql && npm install) && node <skill>/scripts/kql/check_kql.js
+  ```
 - **원문이 들어가는 추출**(`system_prompts`, `content_by_span`)은 `--include-sensitive`가 있어야 돌아간다. 고객 콘텐츠가 로컬에 남으므로 사용자 확인 없이 실행하지 않는다.
 
 ### 3. S_a 측정
